@@ -21,7 +21,12 @@
       "Bash(cp:*)",
       "Bash(rm:*)",
       "Bash(pip install:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(cat:*)",
+      "Bash(pnpm dev)",
+      "Bash(netstat:*)",
+      "Bash(taskkill:*)",
+      "Bash(del \"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\apps\\\\ui\\\\middleware.ts\")"
     ]
   }
 }

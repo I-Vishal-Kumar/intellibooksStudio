@@ -91,8 +91,8 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str):
         content=f"Connected to chat session {session_id}",
         session_id=session_id,
     )
-    await manager.send_personal_message(welcome_message.model_dump(), websocket)
-    
+    await manager.send_personal_message(welcome_message.model_dump(mode="json"), websocket)
+
     # Notify other users in session
     user_joined_message = SystemMessage(
         event="user_joined",
@@ -100,7 +100,7 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str):
         session_id=session_id,
     )
     await manager.broadcast_to_session(
-        user_joined_message.model_dump(),
+        user_joined_message.model_dump(mode="json"),
         session_id,
         exclude=websocket,
     )
@@ -118,7 +118,7 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str):
                     code="INVALID_JSON",
                     session_id=session_id,
                 )
-                await manager.send_personal_message(error_msg.model_dump(), websocket)
+                await manager.send_personal_message(error_msg.model_dump(mode="json"), websocket)
                 continue
             
             # Handle different message types
@@ -153,7 +153,7 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str):
             session_id=session_id,
         )
         await manager.broadcast_to_session(
-            user_left_message.model_dump(),
+            user_left_message.model_dump(mode="json"),
             session_id,
         )
         logger.info(f"Client disconnected from session {session_id}")

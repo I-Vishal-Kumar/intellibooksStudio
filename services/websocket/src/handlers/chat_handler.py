@@ -66,7 +66,8 @@ async def process_chat_message(message: ChatMessage) -> ChatResponse:
         
         if agent_result.success and agent_result.data:
             response_content = agent_result.data.get("response", "I apologize, I couldn't generate a response.")
-            
+            result_metadata = agent_result.metadata or {}
+
             return ChatResponse(
                 type="message",
                 content=response_content,
@@ -75,9 +76,9 @@ async def process_chat_message(message: ChatMessage) -> ChatResponse:
                 message_id=str(uuid4()),
                 timestamp=datetime.utcnow(),
                 metadata={
-                    "agent_id": agent_result.agent_id,
-                    "input_length": agent_result.metadata.get("input_length", 0),
-                    "response_length": agent_result.metadata.get("response_length", 0),
+                    "agent_id": result_metadata.get("agent_id", "simple-chat-agent"),
+                    "input_length": result_metadata.get("input_length", 0),
+                    "response_length": result_metadata.get("response_length", 0),
                 },
             )
         else:

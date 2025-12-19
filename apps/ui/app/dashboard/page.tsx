@@ -38,6 +38,8 @@ export default function DashboardPage() {
     setActiveNav(navId);
     if (navId === "chat") {
       router.push("/chat");
+    } else if (navId === "audio") {
+      router.push("/audio");
     }
   };
 
@@ -120,36 +122,36 @@ export default function DashboardPage() {
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <AgentCard
-                      name="Claims Agent"
+                      name="Transcription Agent"
                       badge="L4"
-                      description="Insurance Claims"
+                      description="Audio to Text"
                       tasks="1,247 tasks"
                       responseTime="4.2s"
                       confidence={94}
                       iconBg="bg-green-500"
                     />
                     <AgentCard
-                      name="Fraud Detector"
+                      name="Translation Agent"
                       badge="L3"
-                      description="Fraud Analysis"
+                      description="Multi-language"
                       tasks="892 tasks"
                       responseTime="2.1s"
                       confidence={89}
                       iconBg="bg-amber-600"
                     />
                     <AgentCard
-                      name="Credit Analyst"
+                      name="Summarization Agent"
                       badge="L4"
-                      description="Loan Underwriting"
+                      description="Key Points Extract"
                       tasks="654 tasks"
                       responseTime="8.7s"
                       confidence={92}
                       iconBg="bg-blue-600"
                     />
                     <AgentCard
-                      name="KYC/AML Agent"
+                      name="Intent Agent"
                       badge="L3"
-                      description="Compliance"
+                      description="Intent & Keywords"
                       tasks="423 tasks"
                       responseTime="5.3s"
                       confidence={97}
@@ -169,34 +171,34 @@ export default function DashboardPage() {
                 </div>
                 <div className="space-y-4">
                   <ActivityItem
-                    text="Claim #AC-2024-78542 approved"
-                    agent="Claims Agent"
+                    text="Audio file transcribed successfully"
+                    agent="Transcription Agent"
                     time="2 min ago"
                     status="success"
                   />
                   <ActivityItem
-                    text="Fraud alert on transaction #TX-9821"
-                    agent="Fraud Detector"
+                    text="Translation to Spanish completed"
+                    agent="Translation Agent"
                     time="5 min ago"
-                    status="warning"
+                    status="success"
                   />
                   <ActivityItem
-                    text="Loan ML-15678 approved at 6.25%"
-                    agent="Credit Analyst"
+                    text="Summary generated with 5 key points"
+                    agent="Summarization Agent"
                     time="8 min ago"
                     status="success"
                   />
                   <ActivityItem
-                    text="KYC verification completed"
-                    agent="KYC/AML Agent"
+                    text="Intent detected: Support inquiry"
+                    agent="Intent Agent"
                     time="12 min ago"
                     status="success"
                   />
                   <ActivityItem
-                    text="Compliance check flagged"
-                    agent="Compliance Agent"
+                    text="Audio quality too low for processing"
+                    agent="Transcription Agent"
                     time="15 min ago"
-                    status="error"
+                    status="warning"
                   />
                 </div>
               </div>
@@ -234,7 +236,7 @@ function Sidebar({
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "agents", label: "Agents", icon: Bot },
     { id: "workflows", label: "Workflows", icon: Workflow },
-    { id: "claims", label: "Claims", icon: FileText },
+    { id: "audio", label: "Audio Processing", icon: FileText },
     { id: "chat", label: "Chat", icon: MessageSquare },
     { id: "knowledge", label: "Knowledge", icon: BookOpen },
     { id: "analytics", label: "Analytics", icon: BarChart3 },
@@ -404,11 +406,11 @@ function ActivityItem({
 // Processing Flow Component
 function ProcessingFlow() {
   const steps = [
-    { label: "Input", status: "completed", icon: FileText, message: "Document received" },
-    { label: "Cognitive", status: "completed", icon: Bot, message: "Intent analyzed" },
-    { label: "Knowledge", status: "processing", icon: BookOpen, message: "Querying..." },
-    { label: "Agents", status: "pending", icon: Users, message: "Awaiting" },
-    { label: "Guardrails", status: "pending", icon: Shield, message: "Awaiting" },
+    { label: "Audio", status: "completed", icon: FileText, message: "File uploaded" },
+    { label: "Transcribe", status: "completed", icon: Bot, message: "Text extracted" },
+    { label: "Translate", status: "processing", icon: BookOpen, message: "Processing..." },
+    { label: "Summarize", status: "pending", icon: Users, message: "Awaiting" },
+    { label: "Analyze", status: "pending", icon: Shield, message: "Awaiting" },
     { label: "Output", status: "pending", icon: CheckCircle2, message: "Awaiting" },
   ];
 
