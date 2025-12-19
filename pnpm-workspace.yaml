@@ -1,0 +1,9 @@
+packages:
+  # Shared packages
+  - "packages/*"
+  # Applications
+  - "apps/*"
+  # Backend services (TypeScript ones)
+  - "services/*"
+  # MCP servers
+  - "mcp-servers/*"

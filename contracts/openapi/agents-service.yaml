@@ -1,0 +1,618 @@
+openapi: 3.1.0
+info:
+  title: Agent Service API
+  description: |
+    API for the Audio Insight Agent Service.
+    Provides audio processing capabilities through specialized agents.
+  version: 1.0.0
+  contact:
+    name: Team 3 - Agents
+    email: agents-team@audio-insight.io
+
+servers:
+  - url: http://localhost:8001
+    description: Local development
+  - url: https://api.audio-insight.io/agents
+    description: Production
+
+tags:
+  - name: Processing
+    description: Audio processing endpoints
+  - name: Agents
+    description: Agent management endpoints
+  - name: Registry
+    description: Agent registry endpoints
+  - name: Health
+    description: Health check endpoints
+
+paths:
+  /api/health:
+    get:
+      summary: Health check
+      operationId: healthCheck
+      tags: [Health]
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/agents/process:
+    post:
+      summary: Process audio file
+      description: |
+        Submit an audio file for processing with selected tasks.
+        Returns a job ID for tracking progress.
+      operationId: processAudio
+      tags: [Processing]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProcessingRequest'
+      responses:
+        '202':
+          description: Processing started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessingStartedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/agents/process/{jobId}:
+    get:
+      summary: Get processing status
+      operationId: getProcessingStatus
+      tags: [Processing]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Processing status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessingResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/agents/process/{jobId}/cancel:
+    post:
+      summary: Cancel processing job
+      operationId: cancelProcessing
+      tags: [Processing]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job cancelled
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/agents/registry:
+    get:
+      summary: List registered agents
+      operationId: listAgents
+      tags: [Registry]
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+          description: Filter by agent type
+        - name: aliveOnly
+          in: query
+          schema:
+            type: boolean
+            default: true
+          description: Only return alive agents
+      responses:
+        '200':
+          description: List of agents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentRegistryEntry'
+
+  /api/agents/{agentId}/identity:
+    get:
+      summary: Get agent identity card
+      operationId: getAgentIdentity
+      tags: [Agents]
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent identity card
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentIdentityCard'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/agents/{agentId}/heartbeat:
+    post:
+      summary: Update agent heartbeat
+      operationId: agentHeartbeat
+      tags: [Agents]
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Heartbeat recorded
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/agents/stats:
+    get:
+      summary: Get registry statistics
+      operationId: getRegistryStats
+      tags: [Registry]
+      responses:
+        '200':
+          description: Registry statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistryStats'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ProcessingRequest:
+      type: object
+      required:
+        - audioSource
+        - tasks
+      properties:
+        audioSource:
+          oneOf:
+            - $ref: '#/components/schemas/FileUpload'
+            - $ref: '#/components/schemas/UrlSource'
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProcessingTask'
+          minItems: 1
+        options:
+          $ref: '#/components/schemas/ProcessingOptions'
+
+    FileUpload:
+      type: object
+      required:
+        - type
+        - fileId
+        - filename
+      properties:
+        type:
+          type: string
+          const: file
+        fileId:
+          type: string
+        filename:
+          type: string
+
+    UrlSource:
+      type: object
+      required:
+        - type
+        - url
+      properties:
+        type:
+          type: string
+          const: url
+        url:
+          type: string
+          format: uri
+
+    ProcessingTask:
+      type: string
+      enum:
+        - transcribe
+        - translate
+        - summarize
+        - detect_intent
+        - extract_keywords
+        - full_pipeline
+
+    ProcessingOptions:
+      type: object
+      properties:
+        sourceLanguage:
+          type: string
+          minLength: 2
+          maxLength: 2
+        targetLanguages:
+          type: array
+          items:
+            type: string
+            minLength: 2
+            maxLength: 2
+        summaryType:
+          type: string
+          enum: [general, key_points, action_items, quick]
+        maxKeywords:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+        includeTimestamps:
+          type: boolean
+          default: false
+        priority:
+          type: string
+          enum: [low, normal, high]
+          default: normal
+
+    ProcessingStartedResponse:
+      type: object
+      required:
+        - jobId
+        - status
+      properties:
+        jobId:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing]
+        message:
+          type: string
+        estimatedDurationMs:
+          type: integer
+
+    ProcessingResult:
+      type: object
+      required:
+        - jobId
+        - status
+      properties:
+        jobId:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        progress:
+          type: number
+          minimum: 0
+          maximum: 100
+        transcription:
+          $ref: '#/components/schemas/Transcript'
+        summary:
+          $ref: '#/components/schemas/Summary'
+        intent:
+          $ref: '#/components/schemas/Intent'
+        keywords:
+          type: array
+          items:
+            $ref: '#/components/schemas/Keyword'
+        translations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Translation'
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProcessingError'
+        metadata:
+          $ref: '#/components/schemas/ProcessingMetadata'
+
+    Transcript:
+      type: object
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+        language:
+          type: string
+        confidence:
+          type: number
+        wordTimestamps:
+          type: array
+          items:
+            $ref: '#/components/schemas/WordTimestamp'
+
+    WordTimestamp:
+      type: object
+      properties:
+        word:
+          type: string
+        start:
+          type: number
+        end:
+          type: number
+        confidence:
+          type: number
+
+    Summary:
+      type: object
+      properties:
+        id:
+          type: string
+        summaryType:
+          type: string
+        summaryText:
+          type: string
+        keyPoints:
+          type: array
+          items:
+            type: string
+        actionItems:
+          type: array
+          items:
+            type: string
+
+    Intent:
+      type: object
+      properties:
+        id:
+          type: string
+        primaryIntent:
+          type: string
+        confidence:
+          type: number
+        sentiment:
+          type: string
+        urgency:
+          type: string
+        reasoning:
+          type: string
+
+    Keyword:
+      type: object
+      properties:
+        keyword:
+          type: string
+        keywordType:
+          type: string
+        relevanceScore:
+          type: number
+        frequency:
+          type: integer
+
+    Translation:
+      type: object
+      properties:
+        targetLanguage:
+          type: string
+        translatedText:
+          type: string
+
+    ProcessingError:
+      type: object
+      properties:
+        task:
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+
+    ProcessingMetadata:
+      type: object
+      properties:
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        durationMs:
+          type: integer
+        modelsUsed:
+          type: object
+          additionalProperties:
+            type: string
+
+    AgentIdentityCard:
+      type: object
+      required:
+        - agentId
+        - agentType
+        - version
+      properties:
+        agentId:
+          type: string
+        agentType:
+          type: string
+        domain:
+          type: string
+        version:
+          type: string
+          pattern: '^\d+\.\d+\.\d+$'
+        capabilities:
+          $ref: '#/components/schemas/CapabilitiesManifest'
+        supportedActions:
+          type: array
+          items:
+            type: string
+        trustLevel:
+          type: string
+          enum: [untrusted, basic, verified, trusted, privileged]
+        digitalSignature:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        lastHeartbeat:
+          type: string
+          format: date-time
+
+    CapabilitiesManifest:
+      type: object
+      properties:
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/Skill'
+        supportedLanguages:
+          type: array
+          items:
+            type: string
+        supportedFormats:
+          type: array
+          items:
+            type: string
+
+    Skill:
+      type: object
+      properties:
+        name:
+          type: string
+        confidenceScore:
+          type: number
+          minimum: 0
+          maximum: 1
+        inputTypes:
+          type: array
+          items:
+            type: string
+        outputTypes:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+
+    AgentRegistryEntry:
+      type: object
+      properties:
+        agentId:
+          type: string
+        name:
+          type: string
+        agentType:
+          type: string
+        version:
+          type: string
+        domain:
+          type: string
+        trustLevel:
+          type: string
+        skills:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              confidence:
+                type: number
+        isAlive:
+          type: boolean
+        lastHeartbeat:
+          type: string
+          format: date-time
+
+    RegistryStats:
+      type: object
+      properties:
+        totalAgents:
+          type: integer
+        aliveAgents:
+          type: integer
+        deadAgents:
+          type: integer
+        localAgents:
+          type: integer
+        remoteAgents:
+          type: integer
+        byType:
+          type: object
+          additionalProperties:
+            type: integer
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        version:
+          type: string
+        uptime:
+          type: integer
+        services:
+          type: object
+          additionalProperties:
+            type: string
+
+    ApiError:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+    ValidationError:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
