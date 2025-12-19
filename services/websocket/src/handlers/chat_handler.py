@@ -17,20 +17,20 @@ logger = logging.getLogger(__name__)
 import sys
 from pathlib import Path
 
-# Add agents service directory to path so we can import from src.agents
+# Add agents src directory to path so relative imports work
 # chat_handler.py is at: services/websocket/src/handlers/chat_handler.py
-# We need: services/agents (parent of src)
-# So: go up 4 levels (handlers -> src -> websocket -> services) then into agents
-agents_service_path = Path(__file__).parent.parent.parent.parent / "agents"
-if agents_service_path.exists():
-    sys.path.insert(0, str(agents_service_path))
-    logger.info(f"Added agents service path: {agents_service_path}")
+# We need: services/agents/src (so agents can use relative imports like ..llm_factory)
+agents_src_path = Path(__file__).parent.parent.parent.parent / "agents" / "src"
+if agents_src_path.exists():
+    if str(agents_src_path) not in sys.path:
+        sys.path.insert(0, str(agents_src_path))
+        logger.info(f"Added agents src to path: {agents_src_path}")
 else:
-    logger.warning(f"Agents service path not found: {agents_service_path}")
+    logger.warning(f"Agents src path not found: {agents_src_path}")
 
 try:
-    # Import from src.agents since we added the agents service directory to path
-    from services.agents.src.agents import ChatAgent
+    # Import from agents.chat_agent (agents is now a package in sys.path)
+    from agents.chat_agent import ChatAgent
     _chat_agent = None
     
     def get_chat_agent():
