@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { useUser, SignInButton, UserButton } from "@clerk/nextjs";
+import { useState, useEffect } from "react";
+import { useUser, UserButton } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
 import { AudioUploader } from "@/components/AudioUploader";
 import { ChatInterface } from "@/components/ChatInterface";
 import { ProcessingOptions } from "@/components/ProcessingOptions";
@@ -9,8 +10,20 @@ import { ResultsPanel } from "@/components/ResultsPanel";
 import { Mic, FileAudio, Brain, Languages } from "lucide-react";
 
 export default function Home() {
-  // const { isSignedIn, user } = useUser();
+  const { isSignedIn, isLoaded } = useUser();
+  const router = useRouter();
   // const [processingResult, setProcessingResult] = useState<any>(null);
+
+  useEffect(() => {
+    if (isLoaded && !isSignedIn) {
+      router.push("/sign-up");
+    }
+  }, [isLoaded, isSignedIn, router]);
+
+  // Don't render content if not signed in (will redirect)
+  if (!isLoaded || !isSignedIn) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
@@ -26,16 +39,9 @@ export default function Home() {
                 Audio Insight
               </span>
             </div>
-{/* 
             <div className="flex items-center gap-4">
-              {isSignedIn ? (
-                <UserButton afterSignOutUrl="/" />
-              ) : (
-                <SignInButton mode="modal">
-                  <button className="btn-primary">Sign In</button>
-                </SignInButton>
-              )}
-            </div> */}
+              {isSignedIn && <UserButton afterSignOutUrl="/sign-in" />}
+            </div>
           </div>
         </div>
       </header>

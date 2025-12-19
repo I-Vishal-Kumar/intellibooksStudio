@@ -1,24 +1,34 @@
+import { DateTime } from "luxon";
 import { Message } from "./types";
 
-export function formatTimestamp(date: Date): string {
-  const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
+export function formatTimestamp(date: Date | string): string {
+  const dateTime = typeof date === "string" ? DateTime.fromISO(date) : DateTime.fromJSDate(date);
+  const now = DateTime.now();
 
-  if (seconds < 60) {
+  const diff = now.diff(dateTime, ["days", "hours", "minutes", "seconds"]);
+
+  if (diff.seconds < 60) {
     return "Just now";
-  } else if (minutes < 60) {
-    return `${minutes}m ago`;
-  } else if (hours < 24) {
-    return `${hours}h ago`;
-  } else if (days < 7) {
-    return `${days}d ago`;
+  } else if (diff.minutes < 60) {
+    return `${Math.floor(diff.minutes)}m ago`;
+  } else if (diff.hours < 24) {
+    return `${Math.floor(diff.hours)}h ago`;
+  } else if (diff.days < 7) {
+    return `${Math.floor(diff.days)}d ago`;
+  } else if (diff.days < 30) {
+    const weeks = Math.floor(diff.days / 7);
+    return `${weeks}w ago`;
+  } else if (diff.days < 365) {
+    const months = Math.floor(diff.days / 30);
+    return `${months}mo ago`;
   } else {
-    return date.toLocaleDateString();
+    return dateTime.toLocaleString(DateTime.DATE_MED);
   }
+}
+
+export function formatFullTimestamp(date: Date | string): string {
+  const dateTime = typeof date === "string" ? DateTime.fromISO(date) : DateTime.fromJSDate(date);
+  return dateTime.toLocaleString(DateTime.DATETIME_MED);
 }
 
 export function generateChatTitle(messages: Message[]): string {

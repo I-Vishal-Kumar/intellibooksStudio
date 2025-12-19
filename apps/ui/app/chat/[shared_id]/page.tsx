@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { ChatContainer } from "@/components/chat";
 import { Message } from "@/lib/chat/types";
-import { getSharedChat } from "@/lib/chat/api";
+import { apiClient } from "@/lib/api";
 
 export default function SharedChatPage() {
   const params = useParams();
@@ -21,7 +21,9 @@ export default function SharedChatPage() {
       setError(null);
 
       try {
-        const chatData = await getSharedChat(sharedId);
+        // TODO: Fetch shared chat via REST API using apiClient
+        const response = await apiClient.get(`/api/v1/chat/shared/${sharedId}`);
+        const chatData = response.data;
         
         // Convert the API response to Message format
         const loadedMessages: Message[] = chatData.messages?.map((msg: {

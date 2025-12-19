@@ -1,0 +1,26 @@
+{
+  "services": {
+    "agents": 8001,
+    "rag": 8002,
+    "rbac": 8003,
+    "websocket": 8004
+  },
+  "apps": {
+    "ui": 3001,
+    "api-gateway": 3000
+  },
+  "infrastructure": {
+    "postgres": 5432,
+    "redis": 6379,
+    "chroma": 8000,
+    "adminer": 8080,
+    "redis-commander": 8081
+  },
+  "mcp": {
+    "database-mcp": 8765,
+    "github-mcp": 8766,
+    "slack-mcp": 8767,
+    "teams-mcp": 8768
+  }
+}
+
