@@ -189,44 +189,173 @@ class FallbackEmbedder:
 
 # ============ ChromaDB Vector Store (Docker) ============
 
+class ChromaDBHttpClient:
+    """Direct HTTP client for ChromaDB Docker instance.
+
+    This bypasses the chromadb Python package which has Pydantic v1/v2 compatibility issues.
+    Uses httpx to communicate directly with ChromaDB's REST API v2.
+    """
+
+    def __init__(self, host: str = "localhost", port: int = 8000):
+        self.base_url = f"http://{host}:{port}"
+        self._tenant = "default_tenant"
+        self._database = "default_database"
+        self._collection_ids = {}  # Cache collection name -> id mapping
+
+    def _api_base(self) -> str:
+        """Get the base path for tenant/database scoped API calls."""
+        return f"/api/v2/tenants/{self._tenant}/databases/{self._database}"
+
+    def _request(self, method: str, path: str, **kwargs) -> dict:
+        """Make HTTP request to ChromaDB."""
+        import httpx
+        url = f"{self.base_url}{path}"
+        with httpx.Client(timeout=60.0) as client:
+            response = client.request(method, url, **kwargs)
+            response.raise_for_status()
+            return response.json() if response.content else {}
+
+    def heartbeat(self) -> int:
+        """Check if ChromaDB is alive."""
+        result = self._request("GET", "/api/v2/heartbeat")
+        return result.get("nanosecond heartbeat", 0)
+
+    def get_or_create_collection(self, name: str, metadata: dict = None) -> str:
+        """Get or create a collection, returns collection ID."""
+        # Check cache first
+        if name in self._collection_ids:
+            return self._collection_ids[name]
+
+        # Try to get existing collection first
+        try:
+            result = self._request(
+                "GET",
+                f"{self._api_base()}/collections/{name}"
+            )
+            collection_id = result.get("id", name)
+            self._collection_ids[name] = collection_id
+            return collection_id
+        except Exception:
+            pass
+
+        # Create new collection
+        result = self._request(
+            "POST",
+            f"{self._api_base()}/collections",
+            json={
+                "name": name,
+                "metadata": metadata or {},
+                "get_or_create": True
+            }
+        )
+        collection_id = result.get("id", name)
+        self._collection_ids[name] = collection_id
+        return collection_id
+
+    def _get_collection_id(self, collection_name: str) -> str:
+        """Get collection ID from name, using cache."""
+        if collection_name not in self._collection_ids:
+            self.get_or_create_collection(collection_name)
+        return self._collection_ids.get(collection_name, collection_name)
+
+    def upsert(self, collection_name: str, ids: list, embeddings: list,
+               documents: list, metadatas: list):
+        """Upsert documents to collection."""
+        collection_id = self._get_collection_id(collection_name)
+        self._request(
+            "POST",
+            f"{self._api_base()}/collections/{collection_id}/upsert",
+            json={
+                "ids": ids,
+                "embeddings": embeddings,
+                "documents": documents,
+                "metadatas": metadatas,
+            }
+        )
+
+    def query(self, collection_name: str, query_embeddings: list, n_results: int = 5,
+              where: dict = None, include: list = None) -> dict:
+        """Query collection for similar documents."""
+        collection_id = self._get_collection_id(collection_name)
+        body = {
+            "query_embeddings": query_embeddings,
+            "n_results": n_results,
+            "include": include or ["documents", "metadatas", "distances"],
+        }
+        if where:
+            body["where"] = where
+
+        return self._request(
+            "POST",
+            f"{self._api_base()}/collections/{collection_id}/query",
+            json=body
+        )
+
+    def delete(self, collection_name: str, where: dict):
+        """Delete documents matching filter."""
+        collection_id = self._get_collection_id(collection_name)
+        self._request(
+            "POST",
+            f"{self._api_base()}/collections/{collection_id}/delete",
+            json={"where": where}
+        )
+
+    def delete_collection(self, collection_name: str):
+        """Delete entire collection."""
+        collection_id = self._get_collection_id(collection_name)
+        self._request(
+            "DELETE",
+            f"{self._api_base()}/collections/{collection_id}"
+        )
+        # Clear from cache
+        self._collection_ids.pop(collection_name, None)
+
+    def count(self, collection_name: str) -> int:
+        """Count documents in collection."""
+        collection_id = self._get_collection_id(collection_name)
+        result = self._request(
+            "GET",
+            f"{self._api_base()}/collections/{collection_id}/count"
+        )
+        return result if isinstance(result, int) else 0
+
+
 class ChromaDBStore:
-    """Vector store using ChromaDB Docker instance."""
+    """Vector store using ChromaDB Docker instance via HTTP."""
 
     def __init__(self, config: RAGConfig):
         self.config = config
         self._client = None
-        self._collection = None
+        self._collection_id = None
         self._embedding_service = EmbeddingService(config.embedding_model)
 
     @property
-    def client(self):
-        """Lazy load ChromaDB client."""
+    def client(self) -> ChromaDBHttpClient:
+        """Lazy load ChromaDB HTTP client."""
         if self._client is None:
-            import warnings
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=UserWarning)
-                import chromadb
-                from chromadb.config import Settings
-
-            # Connect to Docker ChromaDB
-            self._client = chromadb.HttpClient(
+            self._client = ChromaDBHttpClient(
                 host=self.config.chroma_host,
                 port=self.config.chroma_port,
-                settings=Settings(anonymized_telemetry=False),
             )
-            logger.info(f"Connected to ChromaDB at {self.config.chroma_host}:{self.config.chroma_port}")
+            # Verify connection
+            try:
+                self._client.heartbeat()
+                logger.info(f"Connected to ChromaDB at {self.config.chroma_host}:{self.config.chroma_port}")
+            except Exception as e:
+                logger.error(f"Failed to connect to ChromaDB: {e}")
+                raise
         return self._client
 
     @property
-    def collection(self):
-        """Get or create collection."""
-        if self._collection is None:
-            self._collection = self.client.get_or_create_collection(
+    def collection_name(self) -> str:
+        """Get collection name and ensure it exists."""
+        if self._collection_id is None:
+            self._collection_id = self.client.get_or_create_collection(
                 name=self.config.chroma_collection,
                 metadata={"hnsw:space": "cosine"},
             )
             logger.info(f"Using collection: {self.config.chroma_collection}")
-        return self._collection
+        return self.config.chroma_collection
 
     async def add_documents(self, documents: List[Document]) -> List[str]:
         """Add documents to vector store."""
@@ -240,8 +369,12 @@ class ChromaDBStore:
         # Generate embeddings
         embeddings = self._embedding_service.encode(contents).tolist()
 
+        # Ensure collection exists
+        _ = self.collection_name
+
         # Upsert to collection
-        self.collection.upsert(
+        self.client.upsert(
+            collection_name=self.config.chroma_collection,
             ids=ids,
             embeddings=embeddings,
             documents=contents,
@@ -271,8 +404,12 @@ class ChromaDBStore:
                 else:
                     where[key] = value
 
+        # Ensure collection exists
+        _ = self.collection_name
+
         # Search
-        results = self.collection.query(
+        results = self.client.query(
+            collection_name=self.config.chroma_collection,
             query_embeddings=[query_embedding],
             n_results=top_k,
             where=where,
@@ -281,16 +418,16 @@ class ChromaDBStore:
 
         # Convert to SearchResult
         search_results = []
-        if results["ids"] and results["ids"][0]:
+        if results.get("ids") and results["ids"][0]:
             for i, doc_id in enumerate(results["ids"][0]):
-                distance = results["distances"][0][i] if results["distances"] else 0
+                distance = results["distances"][0][i] if results.get("distances") else 0
                 score = 1 - distance
 
                 search_results.append(SearchResult(
                     id=doc_id,
-                    content=results["documents"][0][i] if results["documents"] else "",
+                    content=results["documents"][0][i] if results.get("documents") else "",
                     score=score,
-                    metadata=results["metadatas"][0][i] if results["metadatas"] else {},
+                    metadata=results["metadatas"][0][i] if results.get("metadatas") else {},
                 ))
 
         return search_results
@@ -298,7 +435,10 @@ class ChromaDBStore:
     async def delete_by_document_id(self, document_id: str) -> bool:
         """Delete all chunks for a document."""
         try:
-            self.collection.delete(where={"document_id": document_id})
+            self.client.delete(
+                collection_name=self.config.chroma_collection,
+                where={"document_id": document_id}
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to delete document {document_id}: {e}")
@@ -308,8 +448,9 @@ class ChromaDBStore:
         """Clear all documents."""
         try:
             self.client.delete_collection(self.config.chroma_collection)
-            self._collection = None
-            _ = self.collection  # Recreate
+            self._collection_id = None
+            # Recreate collection
+            _ = self.collection_name
             return True
         except Exception as e:
             logger.error(f"Failed to clear collection: {e}")
@@ -318,7 +459,7 @@ class ChromaDBStore:
     async def count(self) -> int:
         """Get document count."""
         try:
-            return self.collection.count()
+            return self.client.count(self.config.chroma_collection)
         except Exception:
             return 0
 
@@ -357,14 +498,16 @@ class DocumentProcessor:
             return content.decode('utf-8', errors='ignore')
 
     def _extract_pdf(self, content: bytes) -> str:
-        """Extract text from PDF."""
+        """Extract text from PDF. Falls back to OCR for scanned PDFs."""
         try:
             import pypdf
             reader = pypdf.PdfReader(io.BytesIO(content))
             text_parts = []
+            pages_without_text = []
 
             logger.info(f"PDF has {len(reader.pages)} pages")
 
+            # First try standard text extraction
             for i, page in enumerate(reader.pages):
                 try:
                     text = page.extract_text()
@@ -372,10 +515,18 @@ class DocumentProcessor:
                         text_parts.append(text.strip())
                         logger.debug(f"Page {i+1}: extracted {len(text)} chars")
                     else:
-                        logger.warning(f"Page {i+1}: no text extracted (may be scanned/image)")
+                        pages_without_text.append(i)
                 except Exception as page_err:
                     logger.warning(f"Page {i+1}: extraction error - {page_err}")
-                    continue
+                    pages_without_text.append(i)
+
+            # If most pages have no text, try OCR
+            if len(pages_without_text) > len(reader.pages) * 0.5:
+                logger.info(f"PDF appears to be scanned ({len(pages_without_text)}/{len(reader.pages)} pages without text). Attempting OCR...")
+                ocr_text = self._extract_pdf_ocr(content)
+                if ocr_text:
+                    return ocr_text
+                logger.warning("OCR extraction failed or returned no text")
 
             result = "\n\n".join(text_parts)
             logger.info(f"Total extracted: {len(result)} chars from {len(text_parts)} pages")
@@ -385,6 +536,75 @@ class DocumentProcessor:
         except Exception as e:
             logger.error(f"PDF extraction failed: {e}")
             raise
+
+    def _extract_pdf_ocr(self, content: bytes) -> str:
+        """Extract text from scanned PDF using OCR."""
+        try:
+            from pdf2image import convert_from_bytes
+            import pytesseract
+            from PIL import Image
+
+            # Configure Tesseract path for Windows
+            import platform
+            if platform.system() == "Windows":
+                tesseract_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+                if os.path.exists(tesseract_path):
+                    pytesseract.pytesseract.tesseract_cmd = tesseract_path
+
+            logger.info("Converting PDF to images for OCR...")
+
+            # Find poppler path for Windows
+            poppler_path = None
+            if platform.system() == "Windows":
+                # Check common installation paths
+                possible_paths = [
+                    r"C:\Users\JIPL\AppData\Local\Microsoft\WinGet\Packages\oschwartz10612.Poppler_Microsoft.Winget.Source_8wekyb3d8bbwe\poppler-25.07.0\Library\bin",
+                    r"C:\Program Files\poppler\Library\bin",
+                    r"C:\Program Files\poppler\bin",
+                ]
+                for path in possible_paths:
+                    if os.path.exists(path):
+                        poppler_path = path
+                        logger.info(f"Found poppler at: {path}")
+                        break
+
+            # Convert PDF pages to images
+            try:
+                if poppler_path:
+                    images = convert_from_bytes(content, dpi=200, poppler_path=poppler_path)
+                else:
+                    images = convert_from_bytes(content, dpi=200)
+            except Exception as e:
+                logger.warning(f"pdf2image failed (poppler may not be installed): {e}")
+                logger.info("Install poppler: winget install poppler (Windows) or brew install poppler (Mac)")
+                return ""
+
+            text_parts = []
+            for i, image in enumerate(images):
+                try:
+                    # Run OCR on each page
+                    text = pytesseract.image_to_string(image)
+                    if text and text.strip():
+                        text_parts.append(text.strip())
+                        logger.debug(f"OCR Page {i+1}: extracted {len(text)} chars")
+                    else:
+                        logger.debug(f"OCR Page {i+1}: no text found")
+                except Exception as ocr_err:
+                    logger.warning(f"OCR Page {i+1}: error - {ocr_err}")
+                    continue
+
+            result = "\n\n".join(text_parts)
+            logger.info(f"OCR extracted: {len(result)} chars from {len(text_parts)} pages")
+            return result
+
+        except ImportError as e:
+            logger.warning(f"OCR dependencies not installed: {e}")
+            logger.info("Install: pip install pytesseract pdf2image Pillow")
+            logger.info("Also install Tesseract OCR: winget install tesseract (Windows)")
+            return ""
+        except Exception as e:
+            logger.error(f"OCR extraction failed: {e}")
+            return ""
 
     def _extract_docx(self, content: bytes) -> str:
         """Extract text from DOCX."""
@@ -533,40 +753,46 @@ class DocumentProcessor:
 
 # ============ Ray Parallel Processing ============
 
-def init_ray_if_available(config: RAGConfig) -> bool:
-    """Initialize Ray if available and enabled.
+def init_ray_if_available(config: RAGConfig) -> Tuple[bool, None]:
+    """Initialize Ray connection if available and enabled.
 
-    On Windows, Ray doesn't work with venv, so we connect to Docker Ray cluster.
-    The Docker cluster exposes Ray Client on port 10001.
+    Connects to Ray cluster using the ray Python package.
+
+    Returns:
+        Tuple of (is_available, None)
     """
     if not config.use_ray:
-        return False
+        return False, None
 
     try:
         import ray
         if not ray.is_initialized():
-            # Connect to Docker Ray cluster via Ray Client
-            # ray_address format: "ray://localhost:10001"
             try:
                 ray.init(address=config.ray_address, ignore_reinit_error=True)
                 logger.info(f"Connected to Ray cluster at {config.ray_address}")
+                # Log cluster resources
+                resources = ray.available_resources()
+                logger.info(f"Ray cluster resources: {resources}")
+                return True, None
             except Exception as connect_err:
-                # Fallback: try local init (works on Linux/Mac)
                 logger.warning(f"Failed to connect to Ray cluster: {connect_err}")
-                logger.info("Attempting local Ray initialization...")
-                ray.init(num_cpus=config.ray_num_cpus, ignore_reinit_error=True)
-                logger.info(f"Ray initialized locally with {config.ray_num_cpus} CPUs")
-        return True
+                return False, None
+        else:
+            logger.info("Ray already initialized")
+            return True, None
     except ImportError:
-        logger.warning("Ray not installed, falling back to ThreadPoolExecutor")
-        return False
+        logger.warning("Ray package not installed. Run: pip install ray[client]")
+        return False, None
     except Exception as e:
-        logger.warning(f"Ray initialization failed: {e}, falling back to ThreadPoolExecutor")
-        return False
+        logger.warning(f"Ray initialization failed: {e}")
+        return False, None
 
 
 def create_ray_process_task(config: RAGConfig):
-    """Create Ray remote task for document processing."""
+    """Create Ray remote task for document processing.
+
+    Only works if ray package is available.
+    """
     try:
         import ray
 
@@ -669,7 +895,7 @@ class IntelliBooksPipeline:
         self.embedding_service = EmbeddingService(self.config.embedding_model)
 
         # Initialize Ray if enabled
-        self.ray_available = init_ray_if_available(self.config)
+        self.ray_available, _ = init_ray_if_available(self.config)
         self.ray_task = create_ray_process_task(self.config) if self.ray_available else None
 
         # Initialize RabbitMQ if enabled
@@ -900,6 +1126,7 @@ Answer:"""),
     async def get_stats(self) -> Dict[str, Any]:
         """Get pipeline statistics."""
         count = await self.vector_store.count()
+
         return {
             "total_chunks": count,
             "collection": self.config.chroma_collection,
