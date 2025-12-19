@@ -189,44 +189,173 @@ class FallbackEmbedder:
 
 # ============ ChromaDB Vector Store (Docker) ============
 
+class ChromaDBHttpClient:
+    """Direct HTTP client for ChromaDB Docker instance.
+
+    This bypasses the chromadb Python package which has Pydantic v1/v2 compatibility issues.
+    Uses httpx to communicate directly with ChromaDB's REST API v2.
+    """
+
+    def __init__(self, host: str = "localhost", port: int = 8000):
+        self.base_url = f"http://{host}:{port}"
+        self._tenant = "default_tenant"
+        self._database = "default_database"
+        self._collection_ids = {}  # Cache collection name -> id mapping
+
+    def _api_base(self) -> str:
+        """Get the base path for tenant/database scoped API calls."""
+        return f"/api/v2/tenants/{self._tenant}/databases/{self._database}"
+
+    def _request(self, method: str, path: str, **kwargs) -> dict:
+        """Make HTTP request to ChromaDB."""
+        import httpx
+        url = f"{self.base_url}{path}"
+        with httpx.Client(timeout=60.0) as client:
+            response = client.request(method, url, **kwargs)
+            response.raise_for_status()
+            return response.json() if response.content else {}
+
+    def heartbeat(self) -> int:
+        """Check if ChromaDB is alive."""
+        result = self._request("GET", "/api/v2/heartbeat")
+        return result.get("nanosecond heartbeat", 0)
+
+    def get_or_create_collection(self, name: str, metadata: dict = None) -> str:
+        """Get or create a collection, returns collection ID."""
+        # Check cache first
+        if name in self._collection_ids:
+            return self._collection_ids[name]
+
+        # Try to get existing collection first
+        try:
+            result = self._request(
+                "GET",
+                f"{self._api_base()}/collections/{name}"
+            )
+            collection_id = result.get("id", name)
+            self._collection_ids[name] = collection_id
+            return collection_id
+        except Exception:
+            pass
+
+        # Create new collection
+        result = self._request(
+            "POST",
+            f"{self._api_base()}/collections",
+            json={
+                "name": name,
+                "metadata": metadata or {},
+                "get_or_create": True
+            }
+        )
+        collection_id = result.get("id", name)
+        self._collection_ids[name] = collection_id
+        return collection_id
+
+    def _get_collection_id(self, collection_name: str) -> str:
+        """Get collection ID from name, using cache."""
+        if collection_name not in self._collection_ids:
+            self.get_or_create_collection(collection_name)
+        return self._collection_ids.get(collection_name, collection_name)
+
+    def upsert(self, collection_name: str, ids: list, embeddings: list,
+               documents: list, metadatas: list):
+        """Upsert documents to collection."""
+        collection_id = self._get_collection_id(collection_name)
+        self._request(
+            "POST",
+            f"{self._api_base()}/collections/{collection_id}/upsert",
+            json={
+                "ids": ids,
+                "embeddings": embeddings,
+                "documents": documents,
+                "metadatas": metadatas,
+            }
+        )
+
+    def query(self, collection_name: str, query_embeddings: list, n_results: int = 5,
+              where: dict = None, include: list = None) -> dict:
+        """Query collection for similar documents."""
+        collection_id = self._get_collection_id(collection_name)
+        body = {
+            "query_embeddings": query_embeddings,
+            "n_results": n_results,
+            "include": include or ["documents", "metadatas", "distances"],
+        }
+        if where:
+            body["where"] = where
+
+        return self._request(
+            "POST",
+            f"{self._api_base()}/collections/{collection_id}/query",
+            json=body
+        )
+
+    def delete(self, collection_name: str, where: dict):
+        """Delete documents matching filter."""
+        collection_id = self._get_collection_id(collection_name)
+        self._request(
+            "POST",
+            f"{self._api_base()}/collections/{collection_id}/delete",
+            json={"where": where}
+        )
+
+    def delete_collection(self, collection_name: str):
+        """Delete entire collection."""
+        collection_id = self._get_collection_id(collection_name)
+        self._request(
+            "DELETE",
+            f"{self._api_base()}/collections/{collection_id}"
+        )
+        # Clear from cache
+        self._collection_ids.pop(collection_name, None)
+
+    def count(self, collection_name: str) -> int:
+        """Count documents in collection."""
+        collection_id = self._get_collection_id(collection_name)
+        result = self._request(
+            "GET",
+            f"{self._api_base()}/collections/{collection_id}/count"
+        )
+        return result if isinstance(result, int) else 0
+
+
 class ChromaDBStore:
-    """Vector store using ChromaDB Docker instance."""
+    """Vector store using ChromaDB Docker instance via HTTP."""
 
     def __init__(self, config: RAGConfig):
         self.config = config
         self._client = None
-        self._collection = None
+        self._collection_id = None
         self._embedding_service = EmbeddingService(config.embedding_model)
 
     @property
-    def client(self):
-        """Lazy load ChromaDB client."""
+    def client(self) -> ChromaDBHttpClient:
+        """Lazy load ChromaDB HTTP client."""
         if self._client is None:
-            import warnings
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=UserWarning)
-                import chromadb
-                from chromadb.config import Settings
-
-            # Connect to Docker ChromaDB
-            self._client = chromadb.HttpClient(
+            self._client = ChromaDBHttpClient(
                 host=self.config.chroma_host,
                 port=self.config.chroma_port,
-                settings=Settings(anonymized_telemetry=False),
             )
-            logger.info(f"Connected to ChromaDB at {self.config.chroma_host}:{self.config.chroma_port}")
+            # Verify connection
+            try:
+                self._client.heartbeat()
+                logger.info(f"Connected to ChromaDB at {self.config.chroma_host}:{self.config.chroma_port}")
+            except Exception as e:
+                logger.error(f"Failed to connect to ChromaDB: {e}")
+                raise
         return self._client
 
     @property
-    def collection(self):
-        """Get or create collection."""
-        if self._collection is None:
-            self._collection = self.client.get_or_create_collection(
+    def collection_name(self) -> str:
+        """Get collection name and ensure it exists."""
+        if self._collection_id is None:
+            self._collection_id = self.client.get_or_create_collection(
                 name=self.config.chroma_collection,
                 metadata={"hnsw:space": "cosine"},
             )
             logger.info(f"Using collection: {self.config.chroma_collection}")
-        return self._collection
+        return self.config.chroma_collection
 
     async def add_documents(self, documents: List[Document]) -> List[str]:
         """Add documents to vector store."""
@@ -240,8 +369,12 @@ class ChromaDBStore:
         # Generate embeddings
         embeddings = self._embedding_service.encode(contents).tolist()
 
+        # Ensure collection exists
+        _ = self.collection_name
+
         # Upsert to collection
-        self.collection.upsert(
+        self.client.upsert(
+            collection_name=self.config.chroma_collection,
             ids=ids,
             embeddings=embeddings,
             documents=contents,
@@ -271,8 +404,12 @@ class ChromaDBStore:
                 else:
                     where[key] = value
 
+        # Ensure collection exists
+        _ = self.collection_name
+
         # Search
-        results = self.collection.query(
+        results = self.client.query(
+            collection_name=self.config.chroma_collection,
             query_embeddings=[query_embedding],
             n_results=top_k,
             where=where,
@@ -281,16 +418,16 @@ class ChromaDBStore:
 
         # Convert to SearchResult
         search_results = []
-        if results["ids"] and results["ids"][0]:
+        if results.get("ids") and results["ids"][0]:
             for i, doc_id in enumerate(results["ids"][0]):
-                distance = results["distances"][0][i] if results["distances"] else 0
+                distance = results["distances"][0][i] if results.get("distances") else 0
                 score = 1 - distance
 
                 search_results.append(SearchResult(
                     id=doc_id,
-                    content=results["documents"][0][i] if results["documents"] else "",
+                    content=results["documents"][0][i] if results.get("documents") else "",
                     score=score,
-                    metadata=results["metadatas"][0][i] if results["metadatas"] else {},
+                    metadata=results["metadatas"][0][i] if results.get("metadatas") else {},
                 ))
 
         return search_results
@@ -298,7 +435,10 @@ class ChromaDBStore:
     async def delete_by_document_id(self, document_id: str) -> bool:
         """Delete all chunks for a document."""
         try:
-            self.collection.delete(where={"document_id": document_id})
+            self.client.delete(
+                collection_name=self.config.chroma_collection,
+                where={"document_id": document_id}
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to delete document {document_id}: {e}")
@@ -308,8 +448,9 @@ class ChromaDBStore:
         """Clear all documents."""
         try:
             self.client.delete_collection(self.config.chroma_collection)
-            self._collection = None
-            _ = self.collection  # Recreate
+            self._collection_id = None
+            # Recreate collection
+            _ = self.collection_name
             return True
         except Exception as e:
             logger.error(f"Failed to clear collection: {e}")
@@ -318,7 +459,7 @@ class ChromaDBStore:
     async def count(self) -> int:
         """Get document count."""
         try:
-            return self.collection.count()
+            return self.client.count(self.config.chroma_collection)
         except Exception:
             return 0
 
@@ -612,101 +753,39 @@ class DocumentProcessor:
 
 # ============ Ray Parallel Processing ============
 
-class RayClusterClient:
-    """HTTP client for communicating with Ray Docker cluster.
-
-    This bypasses the need for the ray Python package by using Ray's REST APIs.
-    Works with Python 3.14+ where the ray package isn't available.
-    """
-
-    def __init__(self, dashboard_url: str = "http://localhost:8265"):
-        self.dashboard_url = dashboard_url.rstrip("/")
-        self._connected = False
-
-    def check_connection(self) -> bool:
-        """Check if Ray cluster is available."""
-        try:
-            import urllib.request
-            import urllib.error
-
-            req = urllib.request.Request(
-                f"{self.dashboard_url}/api/cluster_status",
-                method="GET"
-            )
-            with urllib.request.urlopen(req, timeout=5) as response:
-                if response.status == 200:
-                    self._connected = True
-                    return True
-        except Exception as e:
-            logger.debug(f"Ray cluster not available: {e}")
-        return False
-
-    def get_cluster_info(self) -> Optional[Dict[str, Any]]:
-        """Get cluster info from Ray dashboard."""
-        try:
-            import urllib.request
-            import urllib.error
-
-            req = urllib.request.Request(
-                f"{self.dashboard_url}/api/cluster_status",
-                method="GET"
-            )
-            with urllib.request.urlopen(req, timeout=5) as response:
-                data = json.loads(response.read().decode())
-                return data
-        except Exception as e:
-            logger.error(f"Failed to get cluster info: {e}")
-            return None
-
-
-def init_ray_if_available(config: RAGConfig) -> Tuple[bool, Optional[RayClusterClient]]:
+def init_ray_if_available(config: RAGConfig) -> Tuple[bool, None]:
     """Initialize Ray connection if available and enabled.
 
-    This uses HTTP to communicate with Ray Docker cluster, bypassing the need
-    for the ray Python package (which doesn't support Python 3.14+ or Windows venv).
+    Connects to Ray cluster using the ray Python package.
 
     Returns:
-        Tuple of (is_available, ray_client)
+        Tuple of (is_available, None)
     """
     if not config.use_ray:
         return False, None
 
-    # First try the ray Python package (works on Linux/Mac with Python <= 3.12)
     try:
         import ray
         if not ray.is_initialized():
             try:
                 ray.init(address=config.ray_address, ignore_reinit_error=True)
-                logger.info(f"Connected to Ray cluster at {config.ray_address} using ray package")
-                return True, None  # None means use ray package directly
+                logger.info(f"Connected to Ray cluster at {config.ray_address}")
+                # Log cluster resources
+                resources = ray.available_resources()
+                logger.info(f"Ray cluster resources: {resources}")
+                return True, None
             except Exception as connect_err:
-                logger.warning(f"Failed to connect via ray package: {connect_err}")
+                logger.warning(f"Failed to connect to Ray cluster: {connect_err}")
+                return False, None
+        else:
+            logger.info("Ray already initialized")
+            return True, None
     except ImportError:
-        logger.info("Ray package not installed, trying HTTP connection...")
+        logger.warning("Ray package not installed. Run: pip install ray[client]")
+        return False, None
     except Exception as e:
-        logger.warning(f"Ray package init failed: {e}")
-
-    # Fallback: Use HTTP connection to Ray dashboard
-    # Extract dashboard URL from ray_address (ray://localhost:10001 -> http://localhost:8265)
-    dashboard_url = "http://localhost:8265"
-    if "localhost" not in config.ray_address and "127.0.0.1" not in config.ray_address:
-        # Extract host from ray://host:port
-        host = config.ray_address.replace("ray://", "").split(":")[0]
-        dashboard_url = f"http://{host}:8265"
-
-    ray_client = RayClusterClient(dashboard_url)
-    if ray_client.check_connection():
-        cluster_info = ray_client.get_cluster_info()
-        if cluster_info:
-            logger.info(f"Connected to Ray cluster via HTTP at {dashboard_url}")
-            # Handle different response formats
-            if isinstance(cluster_info, dict):
-                status = cluster_info.get("data", {}).get("clusterStatus", "connected") if "data" in cluster_info else "connected"
-                logger.info(f"Ray cluster available (HTTP mode)")
-            return True, ray_client
-
-    logger.warning("Ray cluster not available, falling back to ThreadPoolExecutor")
-    return False, None
+        logger.warning(f"Ray initialization failed: {e}")
+        return False, None
 
 
 def create_ray_process_task(config: RAGConfig):
@@ -816,9 +895,8 @@ class IntelliBooksPipeline:
         self.embedding_service = EmbeddingService(self.config.embedding_model)
 
         # Initialize Ray if enabled
-        # Returns (is_available, http_client) - http_client is None if using ray package
-        self.ray_available, self.ray_http_client = init_ray_if_available(self.config)
-        self.ray_task = create_ray_process_task(self.config) if self.ray_available and self.ray_http_client is None else None
+        self.ray_available, _ = init_ray_if_available(self.config)
+        self.ray_task = create_ray_process_task(self.config) if self.ray_available else None
 
         # Initialize RabbitMQ if enabled
         self.rabbitmq = None
@@ -1049,16 +1127,6 @@ Answer:"""),
         """Get pipeline statistics."""
         count = await self.vector_store.count()
 
-        # Determine Ray connection mode
-        ray_mode = "disabled"
-        if self.ray_available:
-            if self.ray_http_client:
-                ray_mode = "http"  # Connected via HTTP to Docker cluster
-            elif self.ray_task:
-                ray_mode = "native"  # Using ray package directly
-            else:
-                ray_mode = "connected"  # Connected but no task available
-
         return {
             "total_chunks": count,
             "collection": self.config.chroma_collection,
@@ -1066,6 +1134,5 @@ Answer:"""),
             "chroma_host": self.config.chroma_host,
             "chroma_port": self.config.chroma_port,
             "ray_enabled": self.ray_available,
-            "ray_mode": ray_mode,
             "rabbitmq_enabled": self.rabbitmq is not None,
         }

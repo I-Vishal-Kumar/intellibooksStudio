@@ -35,7 +35,17 @@
       "Bash(docker ps:*)",
       "Bash(.venvScriptspip.exe install ray[client])",
       "Bash(.venv/Scripts/python.exe:*)",
-      "Bash(where:*)"
+      "Bash(where:*)",
+      "Bash(py -3.12 --version:*)",
+      "Bash(py -3.12 -m venv:*)",
+      "Bash(.venvScriptspython.exe -c \"import ray; print\\(f''Ray version: {ray.__version__}''\\); ray.init\\(address=''ray://localhost:10001'', ignore_reinit_error=True\\); print\\(''Ray connected successfully!''\\); print\\(f''Available resources: {ray.available_resources\\(\\)}''\\); ray.shutdown\\(\\)\")",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\" -c \"import ray; print\\(f''Ray version: {ray.__version__}''\\); ray.init\\(address=''ray://localhost:10001'', ignore_reinit_error=True\\); print\\(''Ray connected successfully!''\\); print\\(f''Available resources: {ray.available_resources\\(\\)}''\\); ray.shutdown\\(\\)\")",
+      "Bash(\".venv\\\\Scripts\\\\pip.exe\" install:*)",
+      "Bash(docker-compose:*)",
+      "Bash(curl:*)",
+      "Bash(docker logs:*)",
+      "Bash(.venvScriptspip.exe show ray)",
+      "Bash(\".venv\\\\Scripts\\\\pip.exe\" show ray)"
     ]
   }
 }

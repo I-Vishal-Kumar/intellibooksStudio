@@ -84,7 +84,7 @@ services:
 
   # Ray Head Node for distributed processing
   ray-head:
-    image: rayproject/ray:2.9.0-py310
+    image: rayproject/ray:2.52.0-py312
     container_name: intellibooks-ray-head
     command: >
       bash -c "ray start --head
@@ -107,7 +107,7 @@ services:
 
   # Ray Worker Node (optional, for scaling)
   ray-worker:
-    image: rayproject/ray:2.9.0-py310
+    image: rayproject/ray:2.52.0-py312
     container_name: intellibooks-ray-worker
     command: ray start --address=ray-head:6379 --block
     environment:
