@@ -1,3 +1,3 @@
-"""Agent Service for Audio Insight Platform."""
+"""Agent Service for Intellibooks Studio."""
 
 __version__ = "1.0.0"

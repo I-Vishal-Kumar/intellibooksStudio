@@ -1,3 +1,3 @@
-"""RAG Service for Audio Insight Platform."""
+"""RAG Service for Intellibooks Studio."""
 
 __version__ = "1.0.0"

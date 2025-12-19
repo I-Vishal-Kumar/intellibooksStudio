@@ -1,5 +1,5 @@
 {
-  "name": "@audio-insight/slack-mcp",
+  "name": "@intellibooks/slack-mcp",
   "version": "1.0.0",
   "description": "MCP Server for Slack integration",
   "type": "module",

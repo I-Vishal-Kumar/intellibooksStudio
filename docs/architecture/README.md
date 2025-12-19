@@ -1,8 +1,8 @@
-# Audio Insight Platform - Architecture Guide
+# Intellibooks Studio - Architecture Guide
 
 ## Overview
 
-Audio Insight is a multi-team monorepo platform for audio transcription, translation, summarization, intent detection, and keyword extraction. It uses a **Monorepo with Internal Packages + MCP Communication Layer** architecture.
+Intellibooks Studio is a multi-team monorepo platform for document intelligence, audio transcription, translation, summarization, RAG, intent detection, and keyword extraction. It uses a **Monorepo with Internal Packages + MCP Communication Layer** architecture.
 
 ## Architecture Diagram
 

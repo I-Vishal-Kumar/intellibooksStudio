@@ -1,65 +1,57 @@
-"""RAG Service API."""
+"""Intellibooks Studio - RAG Service API.
 
-from fastapi import FastAPI, HTTPException, Depends
+Provides endpoints for document upload, knowledge base queries, and RAG operations.
+Uses the IntelliBooksPipeline with Ray, RabbitMQ, and Docker ChromaDB support.
+"""
+
+import logging
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
+import time
 
-from ..config import get_settings
-from ..vector_store import ChromaVectorStore
-from ..indexer import DocumentIndexer
-from ..retriever import SemanticRetriever
-from ..query_engine import RAGQueryEngine
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Global instances
-vector_store: ChromaVectorStore = None
-indexer: DocumentIndexer = None
-retriever: SemanticRetriever = None
-query_engine: RAGQueryEngine = None
+# Global pipeline instance
+pipeline = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize services on startup."""
-    global vector_store, indexer, retriever, query_engine
+    """Initialize RAG pipeline on startup."""
+    global pipeline
 
-    settings = get_settings()
+    logger.info("Initializing Intellibooks RAG Service...")
 
-    # Initialize vector store
-    vector_store = ChromaVectorStore(
-        host=settings.chroma_host,
-        port=settings.chroma_port,
-        collection_name=settings.chroma_collection,
-        embedding_model=settings.embedding_model,
-    )
+    try:
+        from ..rag_pipeline import IntelliBooksPipeline, load_config
 
-    # Initialize components
-    indexer = DocumentIndexer(
-        vector_store=vector_store,
-        chunk_size=settings.chunk_size,
-        chunk_overlap=settings.chunk_overlap,
-    )
+        config = load_config()
+        pipeline = IntelliBooksPipeline(config)
 
-    retriever = SemanticRetriever(
-        vector_store=vector_store,
-        default_top_k=settings.top_k_results,
-    )
+        logger.info(f"RAG Service initialized successfully")
+        logger.info(f"  ChromaDB: {config.chroma_host}:{config.chroma_port}")
+        logger.info(f"  Ray enabled: {pipeline.ray_available}")
+        logger.info(f"  RabbitMQ enabled: {pipeline.rabbitmq is not None}")
 
-    query_engine = RAGQueryEngine(
-        retriever=retriever,
-        llm_provider=settings.default_llm_provider,
-    )
+    except Exception as e:
+        logger.error(f"Failed to initialize RAG service: {e}")
+        import traceback
+        traceback.print_exc()
+        pipeline = None
 
     yield
 
-    # Cleanup if needed
+    logger.info("Shutting down Intellibooks RAG Service")
 
 
 app = FastAPI(
-    title="RAG Service",
-    description="RAG Pipeline Service for Audio Insight",
-    version="1.0.0",
+    title="Intellibooks Studio - RAG Service",
+    description="Document Knowledge Base with RAG Pipeline powered by Ray, RabbitMQ, and ChromaDB",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -72,20 +64,7 @@ app.add_middleware(
 )
 
 
-# Request/Response Models
-class IndexTranscriptRequest(BaseModel):
-    transcript_id: str
-    text: str
-    metadata: Optional[Dict[str, Any]] = None
-
-
-class IndexSummaryRequest(BaseModel):
-    summary_id: str
-    transcript_id: str
-    summary_text: str
-    key_points: List[str]
-    metadata: Optional[Dict[str, Any]] = None
-
+# ============ Request/Response Models ============
 
 class QueryRequest(BaseModel):
     query: str
@@ -93,145 +72,271 @@ class QueryRequest(BaseModel):
     filters: Optional[Dict[str, Any]] = None
 
 
-class ChatQueryRequest(BaseModel):
+class ChatRequest(BaseModel):
     query: str
     chat_history: List[Dict[str, str]] = []
     top_k: Optional[int] = 5
 
 
-class SearchRequest(BaseModel):
-    query: str
-    top_k: Optional[int] = 5
-    filters: Optional[Dict[str, Any]] = None
-    min_score: Optional[float] = 0.5
+class DeleteDocumentRequest(BaseModel):
+    document_id: str
 
 
-# Endpoints
+# ============ Health & Status Endpoints ============
+
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint."""
-    count = await vector_store.count() if vector_store else 0
-    return {
-        "status": "healthy",
-        "service": "rag-service",
-        "version": "1.0.0",
-        "documents_indexed": count,
-    }
-
-
-@app.post("/api/rag/index")
-async def index_transcript(request: IndexTranscriptRequest):
-    """Index a transcript for RAG retrieval."""
     try:
-        chunk_ids = await indexer.index_transcript(
-            transcript_id=request.transcript_id,
-            text=request.text,
-            metadata=request.metadata,
-        )
+        if pipeline:
+            stats = await pipeline.get_stats()
+            return {
+                "status": "healthy",
+                "service": "intellibooks-rag",
+                "version": "2.0.0",
+                "documents_indexed": stats.get("total_chunks", 0),
+                "chroma_connected": True,
+                "ray_enabled": stats.get("ray_enabled", False),
+                "rabbitmq_enabled": stats.get("rabbitmq_enabled", False),
+            }
         return {
-            "success": True,
-            "transcript_id": request.transcript_id,
-            "chunks_created": len(chunk_ids),
-            "chunk_ids": chunk_ids,
+            "status": "degraded",
+            "service": "intellibooks-rag",
+            "error": "Pipeline not initialized",
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/rag/index-summary")
-async def index_summary(request: IndexSummaryRequest):
-    """Index a summary with key points."""
-    try:
-        chunk_ids = await indexer.index_summary(
-            summary_id=request.summary_id,
-            transcript_id=request.transcript_id,
-            summary_text=request.summary_text,
-            key_points=request.key_points,
-            metadata=request.metadata,
-        )
         return {
-            "success": True,
-            "summary_id": request.summary_id,
-            "chunks_created": len(chunk_ids),
+            "status": "error",
+            "service": "intellibooks-rag",
+            "error": str(e),
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.delete("/api/rag/index/{transcript_id}")
-async def delete_transcript_index(transcript_id: str):
-    """Delete indexed chunks for a transcript."""
-    try:
-        success = await indexer.delete_transcript(transcript_id)
-        return {"success": success, "transcript_id": transcript_id}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/rag/query")
-async def query_rag(request: QueryRequest):
-    """Query the RAG system."""
-    try:
-        response = await query_engine.query(
-            question=request.query,
-            top_k=request.top_k,
-            filters=request.filters,
-        )
-        return response.model_dump()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/rag/chat")
-async def chat_query(request: ChatQueryRequest):
-    """Query with chat history context."""
-    try:
-        response = await query_engine.query_with_chat_history(
-            question=request.query,
-            chat_history=request.chat_history,
-            top_k=request.top_k,
-        )
-        return response.model_dump()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/rag/search")
-async def search(request: SearchRequest):
-    """Semantic search without LLM generation."""
-    try:
-        result = await retriever.retrieve(
-            query=request.query,
-            top_k=request.top_k,
-            filters=request.filters,
-            min_score=request.min_score,
-        )
-        return {
-            "query": result.query,
-            "results": [
-                {
-                    "id": chunk.id,
-                    "content": chunk.content,
-                    "score": chunk.score,
-                    "metadata": chunk.metadata,
-                }
-                for chunk in result.chunks
-            ],
-            "total_results": result.total_results,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/rag/stats")
 async def get_stats():
     """Get RAG system statistics."""
-    try:
-        count = await vector_store.count()
+    if pipeline is None:
         return {
-            "total_documents": count,
-            "collection": get_settings().chroma_collection,
-            "embedding_model": get_settings().embedding_model,
+            "status": "not_initialized",
+            "total_chunks": 0,
+        }
+
+    try:
+        stats = await pipeline.get_stats()
+        return {
+            "status": "ready",
+            **stats,
+        }
+    except Exception as e:
+        logger.exception(f"Error getting stats: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+        }
+
+
+# ============ Document Upload Endpoints ============
+
+@app.post("/api/rag/upload")
+async def upload_document(
+    file: UploadFile = File(...),
+    document_id: Optional[str] = Form(None),
+):
+    """Upload and process a document into the knowledge base."""
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="RAG service not initialized")
+
+    try:
+        start_time = time.time()
+
+        content = await file.read()
+        filename = file.filename or "unknown"
+
+        logger.info(f"Processing document: {filename} ({len(content)} bytes)")
+
+        result = await pipeline.ingest_document(
+            content=content,
+            filename=filename,
+            document_id=document_id,
+        )
+
+        return {
+            "success": result.success,
+            "document_id": result.document_id,
+            "filename": result.filename,
+            "chunks_created": result.chunks_created,
+            "processing_time_ms": result.processing_time_ms,
+            "error": result.error,
+        }
+
+    except Exception as e:
+        logger.exception(f"Error uploading document: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/rag/upload-multiple")
+async def upload_multiple_documents(
+    files: List[UploadFile] = File(...),
+):
+    """Upload and process multiple documents in parallel (uses Ray if available)."""
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="RAG service not initialized")
+
+    try:
+        start_time = time.time()
+
+        # Read all files
+        documents = []
+        for file in files:
+            content = await file.read()
+            filename = file.filename or "unknown"
+            documents.append((content, filename, None, None))
+
+        logger.info(f"Processing {len(documents)} documents in parallel")
+
+        # Process all documents in parallel (uses Ray if enabled)
+        results = await pipeline.ingest_documents_parallel(documents)
+
+        total_time = (time.time() - start_time) * 1000
+        total_chunks = sum(r.chunks_created for r in results)
+        successful = sum(1 for r in results if r.success)
+
+        return {
+            "success": True,
+            "total_documents": len(documents),
+            "successful_documents": successful,
+            "total_chunks_created": total_chunks,
+            "total_processing_time_ms": total_time,
+            "ray_used": pipeline.ray_available,
+            "results": [
+                {
+                    "document_id": r.document_id,
+                    "filename": r.filename,
+                    "success": r.success,
+                    "chunks_created": r.chunks_created,
+                    "processing_time_ms": r.processing_time_ms,
+                    "error": r.error,
+                }
+                for r in results
+            ],
+        }
+
+    except Exception as e:
+        logger.exception(f"Error uploading documents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============ Query Endpoints ============
+
+@app.post("/api/rag/query")
+async def query_knowledge_base(request: QueryRequest):
+    """Query the knowledge base with RAG (semantic search + LLM generation)."""
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="RAG service not initialized")
+
+    try:
+        response = await pipeline.query(
+            query=request.query,
+            top_k=request.top_k,
+            filters=request.filters,
+        )
+
+        return {
+            "answer": response.answer,
+            "sources": response.sources,
+            "query": response.query,
+            "processing_time_ms": response.processing_time_ms,
+            "confidence": response.confidence,
+        }
+
+    except Exception as e:
+        logger.exception(f"Error querying knowledge base: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/rag/search")
+async def search_documents(request: QueryRequest):
+    """Semantic search without LLM generation."""
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="RAG service not initialized")
+
+    try:
+        start_time = time.time()
+
+        search_results = await pipeline.search(
+            query=request.query,
+            top_k=request.top_k,
+            filters=request.filters,
+        )
+
+        return {
+            "query": request.query,
+            "results": [
+                {
+                    "id": r.id,
+                    "content": r.content,
+                    "score": r.score,
+                    "metadata": r.metadata,
+                }
+                for r in search_results
+            ],
+            "total_results": len(search_results),
+            "processing_time_ms": (time.time() - start_time) * 1000,
+        }
+
+    except Exception as e:
+        logger.exception(f"Error searching documents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============ Management Endpoints ============
+
+@app.delete("/api/rag/document/{document_id}")
+async def delete_document(document_id: str):
+    """Delete a document and all its chunks."""
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="RAG service not initialized")
+
+    try:
+        success = await pipeline.delete_document(document_id)
+        return {
+            "success": success,
+            "document_id": document_id,
+        }
+    except Exception as e:
+        logger.exception(f"Error deleting document: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/rag/clear")
+async def clear_knowledge_base():
+    """Clear all documents from the knowledge base."""
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="RAG service not initialized")
+
+    try:
+        success = await pipeline.clear()
+        return {
+            "success": success,
+            "message": "Knowledge base cleared" if success else "Failed to clear",
+        }
+    except Exception as e:
+        logger.exception(f"Error clearing knowledge base: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/rag/documents")
+async def list_documents():
+    """List indexed document statistics."""
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="RAG service not initialized")
+
+    try:
+        stats = await pipeline.get_stats()
+        return {
+            "total_chunks": stats.get("total_chunks", 0),
+            "collection": stats.get("collection", "unknown"),
+            "message": "Full document listing coming in future update",
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -239,5 +344,4 @@ async def get_stats():
 
 if __name__ == "__main__":
     import uvicorn
-    settings = get_settings()
-    uvicorn.run(app, host=settings.host, port=settings.port)
+    uvicorn.run(app, host="0.0.0.0", port=8002)

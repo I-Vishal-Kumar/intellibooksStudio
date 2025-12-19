@@ -1,7 +1,7 @@
 [project]
-name = "audio-insight-agent-framework"
+name = "intellibooks-agent-framework"
 version = "1.0.0"
-description = "Agent Framework with Identity Cards and DNA Blueprint for Audio Insight"
+description = "Agent Framework with Identity Cards and DNA Blueprint for Intellibooks Studio"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

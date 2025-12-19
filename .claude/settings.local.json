@@ -26,7 +26,12 @@
       "Bash(pnpm dev)",
       "Bash(netstat:*)",
       "Bash(taskkill:*)",
-      "Bash(del \"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\apps\\\\ui\\\\middleware.ts\")"
+      "Bash(del \"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\apps\\\\ui\\\\middleware.ts\")",
+      "Bash(.venvScriptspython.exe -m uvicorn:*)",
+      "Bash(.venvScriptspip.exe install pypdf python-docx beautifulsoup4 --quiet)",
+      "Bash(\".venv\\\\Scripts\\\\pip.exe\" install pypdf python-docx beautifulsoup4)",
+      "Bash(.venvScriptspip.exe install pika)",
+      "Bash(.venv/Scripts/pip.exe install:*)"
     ]
   }
 }

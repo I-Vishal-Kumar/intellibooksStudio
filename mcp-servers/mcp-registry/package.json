@@ -1,5 +1,5 @@
 {
-  "name": "@audio-insight/mcp-registry",
+  "name": "@intellibooks/mcp-registry",
   "version": "1.0.0",
   "description": "MCP Server Registry - discovers and routes to available MCP servers",
   "type": "module",

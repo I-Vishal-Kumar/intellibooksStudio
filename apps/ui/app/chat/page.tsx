@@ -239,10 +239,10 @@ export default function ChatPage() {
               <ChevronLeft className="w-5 h-5 text-gray-600" />
             </button>
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-gradient-to-br from-green-500 to-green-600 rounded-lg flex items-center justify-center">
-                <span className="text-sm font-bold text-white">j</span>
+              <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
+                <span className="text-xs font-bold text-white">IB</span>
               </div>
-              <span className="font-semibold text-gray-900">jAI Chat</span>
+              <span className="font-semibold text-gray-900">Intellibooks Chat</span>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -258,7 +258,7 @@ export default function ChatPage() {
           {messages.length === 0 ? (
             /* Welcome Screen */
             <div className="flex flex-col items-center justify-center h-full px-4">
-              <div className="w-16 h-16 bg-gradient-to-br from-green-500 to-green-600 rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-green-500/20">
+              <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-indigo-500/20">
                 <Sparkles className="w-8 h-8 text-white" />
               </div>
               <h1 className="text-2xl font-bold text-gray-900 mb-2">
@@ -276,7 +276,7 @@ export default function ChatPage() {
                     onClick={() => setInput(prompt.text)}
                     className="flex items-center gap-3 p-4 bg-gray-50 hover:bg-gray-100 rounded-xl border border-gray-200 transition-colors text-left"
                   >
-                    <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center text-green-600 border border-gray-200">
+                    <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center text-indigo-600 border border-gray-200">
                       {prompt.icon}
                     </div>
                     <span className="text-sm font-medium text-gray-700">
@@ -299,13 +299,13 @@ export default function ChatPage() {
                   <div
                     className={`${
                       message.role === "user"
-                        ? "bg-green-600 text-white rounded-2xl rounded-br-md px-4 py-3 max-w-[80%]"
+                        ? "bg-indigo-600 text-white rounded-2xl rounded-br-md px-4 py-3 max-w-[80%]"
                         : "flex gap-4"
                     }`}
                   >
                     {message.role === "assistant" && (
-                      <div className="w-8 h-8 bg-gradient-to-br from-green-500 to-green-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <span className="text-xs font-bold text-white">j</span>
+                      <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <span className="text-xs font-bold text-white">IB</span>
                       </div>
                     )}
                     <div className={message.role === "user" ? "" : "flex-1"}>
@@ -326,8 +326,8 @@ export default function ChatPage() {
               ))}
               {isLoading && (
                 <div className="flex gap-4 mb-6">
-                  <div className="w-8 h-8 bg-gradient-to-br from-green-500 to-green-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <span className="text-xs font-bold text-white">j</span>
+                  <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <span className="text-xs font-bold text-white">IB</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
@@ -403,7 +403,7 @@ export default function ChatPage() {
               </div>
             )}
 
-            <div className="relative flex items-end gap-2 bg-gray-50 rounded-2xl border border-gray-200 focus-within:border-green-500 focus-within:ring-2 focus-within:ring-green-500/20 transition-all">
+            <div className="relative flex items-end gap-2 bg-gray-50 rounded-2xl border border-gray-200 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all">
               {/* Microphone Button */}
               <button
                 onClick={isRecording ? stopRecording : startRecording}
@@ -441,7 +441,7 @@ export default function ChatPage() {
               <button
                 onClick={handleSend}
                 disabled={!input.trim() || isLoading || !isConnected}
-                className="m-2 p-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-xl transition-colors"
+                className="m-2 p-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-xl transition-colors"
               >
                 <Send className="w-5 h-5 text-white" />
               </button>
@@ -449,7 +449,7 @@ export default function ChatPage() {
             <p className="text-xs text-gray-400 text-center mt-2">
               {isRecording
                 ? "Click the microphone or 'Stop' to finish recording"
-                : "jAI can make mistakes. Verify important information."}
+                : "Intellibooks AI can make mistakes. Verify important information."}
             </p>
           </div>
         </div>

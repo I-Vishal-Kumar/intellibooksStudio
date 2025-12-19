@@ -1,6 +1,6 @@
 version: '3.8'
 
-# Audio Insight Platform - Development Docker Compose
+# Intellibooks Studio - Development Docker Compose
 # This configuration sets up all services needed for local development
 
 services:
@@ -10,9 +10,9 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    container_name: audio-insight-postgres
+    container_name: intellibooks-postgres
     environment:
-      POSTGRES_DB: audio_insight
+      POSTGRES_DB: intellibooks
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: ${DB_PASSWORD:-devpassword123}
     volumes:
@@ -21,16 +21,16 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d audio_insight"]
+      test: ["CMD-SHELL", "pg_isready -U admin -d intellibooks"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - audio-insight-network
+      - intellibooks-network
 
   redis:
     image: redis:7-alpine
-    container_name: audio-insight-redis
+    container_name: intellibooks-redis
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
@@ -42,11 +42,11 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - audio-insight-network
+      - intellibooks-network
 
   chroma:
     image: chromadb/chroma:latest
-    container_name: audio-insight-chroma
+    container_name: intellibooks-chroma
     environment:
       - IS_PERSISTENT=TRUE
       - PERSIST_DIRECTORY=/chroma/chroma
@@ -61,7 +61,64 @@ services:
       timeout: 10s
       retries: 3
     networks:
-      - audio-insight-network
+      - intellibooks-network
+
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: intellibooks-rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-devpassword123}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - intellibooks-network
+
+  # Ray Head Node for distributed processing
+  ray-head:
+    image: rayproject/ray:2.9.0-py310
+    container_name: intellibooks-ray-head
+    command: >
+      bash -c "ray start --head
+      --dashboard-host=0.0.0.0
+      --port=6379
+      --dashboard-port=8265
+      --ray-client-server-port=10001
+      --block"
+    environment:
+      - RAY_DISABLE_DOCKER_CPU_WARNING=1
+    ports:
+      - "6380:6379"      # Ray GCS (avoid conflict with Redis)
+      - "8265:8265"      # Ray Dashboard
+      - "10001:10001"    # Ray Client
+    shm_size: '2gb'
+    networks:
+      - intellibooks-network
+    profiles:
+      - ray
+
+  # Ray Worker Node (optional, for scaling)
+  ray-worker:
+    image: rayproject/ray:2.9.0-py310
+    container_name: intellibooks-ray-worker
+    command: ray start --address=ray-head:6379 --block
+    environment:
+      - RAY_DISABLE_DOCKER_CPU_WARNING=1
+    shm_size: '2gb'
+    depends_on:
+      - ray-head
+    networks:
+      - intellibooks-network
+    profiles:
+      - ray
 
   # ============================================
   # Application Services
@@ -71,11 +128,11 @@ services:
     build:
       context: ../../apps/api-gateway
       dockerfile: Dockerfile
-    container_name: audio-insight-gateway
+    container_name: intellibooks-gateway
     environment:
       - NODE_ENV=development
       - PORT=3000
-      - DATABASE_URL=postgresql://admin:${DB_PASSWORD:-devpassword123}@postgres:5432/audio_insight
+      - DATABASE_URL=postgresql://admin:${DB_PASSWORD:-devpassword123}@postgres:5432/intellibooks
       - REDIS_URL=redis://redis:6379
       - CLERK_SECRET_KEY=${CLERK_SECRET_KEY}
       - AGENT_SERVICE_URL=http://agent-service:8001
@@ -89,7 +146,7 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - audio-insight-network
+      - intellibooks-network
     profiles:
       - full
 
@@ -97,10 +154,10 @@ services:
     build:
       context: ../../services/agents
       dockerfile: Dockerfile
-    container_name: audio-insight-agents
+    container_name: intellibooks-agents
     environment:
       - PYTHONPATH=/app
-      - DATABASE_URL=postgresql://admin:${DB_PASSWORD:-devpassword123}@postgres:5432/audio_insight
+      - DATABASE_URL=postgresql://admin:${DB_PASSWORD:-devpassword123}@postgres:5432/intellibooks
       - REDIS_URL=redis://redis:6379
       - CHROMA_HOST=chroma
       - CHROMA_PORT=8000
@@ -122,7 +179,7 @@ services:
       chroma:
         condition: service_healthy
     networks:
-      - audio-insight-network
+      - intellibooks-network
     profiles:
       - full
 
@@ -130,13 +187,17 @@ services:
     build:
       context: ../../services/rag
       dockerfile: Dockerfile
-    container_name: audio-insight-rag
+    container_name: intellibooks-rag
     environment:
       - PYTHONPATH=/app
-      - DATABASE_URL=postgresql://admin:${DB_PASSWORD:-devpassword123}@postgres:5432/audio_insight
+      - DATABASE_URL=postgresql://admin:${DB_PASSWORD:-devpassword123}@postgres:5432/intellibooks
       - REDIS_URL=redis://redis:6379
       - CHROMA_HOST=chroma
       - CHROMA_PORT=8000
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - USE_RAY=${USE_RAY:-false}
+      - USE_RABBITMQ=${USE_RABBITMQ:-false}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
@@ -149,8 +210,10 @@ services:
         condition: service_healthy
       chroma:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     networks:
-      - audio-insight-network
+      - intellibooks-network
     profiles:
       - full
 
@@ -158,11 +221,11 @@ services:
     build:
       context: ../../services/rbac
       dockerfile: Dockerfile
-    container_name: audio-insight-rbac
+    container_name: intellibooks-rbac
     environment:
       - NODE_ENV=development
       - PORT=8003
-      - DATABASE_URL=postgresql://admin:${DB_PASSWORD:-devpassword123}@postgres:5432/audio_insight
+      - DATABASE_URL=postgresql://admin:${DB_PASSWORD:-devpassword123}@postgres:5432/intellibooks
       - REDIS_URL=redis://redis:6379
       - CLERK_SECRET_KEY=${CLERK_SECRET_KEY}
     ports:
@@ -173,7 +236,7 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - audio-insight-network
+      - intellibooks-network
     profiles:
       - full
 
@@ -181,7 +244,7 @@ services:
     build:
       context: ../../apps/ui
       dockerfile: Dockerfile
-    container_name: audio-insight-ui
+    container_name: intellibooks-ui
     environment:
       - NODE_ENV=development
       - NEXT_PUBLIC_API_URL=http://localhost:3000
@@ -191,7 +254,7 @@ services:
     depends_on:
       - api-gateway
     networks:
-      - audio-insight-network
+      - intellibooks-network
     profiles:
       - full
 
@@ -203,16 +266,16 @@ services:
     build:
       context: ../../mcp-servers/database-mcp
       dockerfile: Dockerfile
-    container_name: audio-insight-db-mcp
+    container_name: intellibooks-db-mcp
     environment:
-      - DATABASE_URL=postgresql://admin:${DB_PASSWORD:-devpassword123}@postgres:5432/audio_insight
+      - DATABASE_URL=postgresql://admin:${DB_PASSWORD:-devpassword123}@postgres:5432/intellibooks
     ports:
       - "8765:8765"
     depends_on:
       postgres:
         condition: service_healthy
     networks:
-      - audio-insight-network
+      - intellibooks-network
     profiles:
       - mcp
 
@@ -222,19 +285,19 @@ services:
 
   adminer:
     image: adminer:latest
-    container_name: audio-insight-adminer
+    container_name: intellibooks-adminer
     ports:
       - "8080:8080"
     depends_on:
       - postgres
     networks:
-      - audio-insight-network
+      - intellibooks-network
     profiles:
       - tools
 
   redis-commander:
     image: rediscommander/redis-commander:latest
-    container_name: audio-insight-redis-ui
+    container_name: intellibooks-redis-ui
     environment:
       - REDIS_HOSTS=local:redis:6379
     ports:
@@ -242,21 +305,23 @@ services:
     depends_on:
       - redis
     networks:
-      - audio-insight-network
+      - intellibooks-network
     profiles:
       - tools
 
 volumes:
   postgres_data:
-    name: audio-insight-postgres-data
+    name: intellibooks-postgres-data
   redis_data:
-    name: audio-insight-redis-data
+    name: intellibooks-redis-data
   chroma_data:
-    name: audio-insight-chroma-data
+    name: intellibooks-chroma-data
+  rabbitmq_data:
+    name: intellibooks-rabbitmq-data
   agent_data:
-    name: audio-insight-agent-data
+    name: intellibooks-agent-data
 
 networks:
-  audio-insight-network:
-    name: audio-insight-network
+  intellibooks-network:
+    name: intellibooks-network
     driver: bridge

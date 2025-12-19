@@ -36,10 +36,18 @@ export default function DashboardPage() {
 
   const handleNavClick = (navId: string) => {
     setActiveNav(navId);
-    if (navId === "chat") {
-      router.push("/chat");
-    } else if (navId === "audio") {
-      router.push("/audio");
+    const routes: Record<string, string> = {
+      dashboard: "/dashboard",
+      agents: "/agents",
+      workflows: "/workflows",
+      audio: "/audio",
+      chat: "/chat",
+      knowledge: "/knowledge",
+      analytics: "/analytics",
+      settings: "/settings",
+    };
+    if (routes[navId]) {
+      router.push(routes[navId]);
     }
   };
 
@@ -64,7 +72,7 @@ export default function DashboardPage() {
                 <button className="p-2 rounded-2xl bg-white/60 backdrop-blur-sm border border-gray-200/50 hover:bg-white/80 transition-all">
                   <RefreshCw className="w-5 h-5 text-gray-600" />
                 </button>
-                <button className="px-4 py-2 rounded-2xl bg-gradient-to-r from-green-500 to-green-600 text-white font-medium flex items-center gap-2 hover:from-green-600 hover:to-green-700 transition-all shadow-lg shadow-green-500/20">
+                <button className="px-4 py-2 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-medium flex items-center gap-2 hover:from-indigo-600 hover:to-purple-700 transition-all shadow-lg shadow-indigo-500/20">
                   <Plus className="w-4 h-4" />
                   New Agent
                 </button>
@@ -247,10 +255,10 @@ function Sidebar({
       {/* Logo */}
       <div className="p-6 border-b border-gray-200/50">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-green-600 rounded-2xl flex items-center justify-center shadow-lg shadow-green-500/20">
-            <div className="w-6 h-6 text-white font-bold">j</div>
+          <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
+            <div className="w-6 h-6 text-white font-bold">IB</div>
           </div>
-          <span className="text-lg font-bold text-gray-900">jAI Enterprise AI</span>
+          <span className="text-lg font-bold text-gray-900">Intellibooks Studio</span>
         </div>
       </div>
 

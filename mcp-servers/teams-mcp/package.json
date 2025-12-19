@@ -1,5 +1,5 @@
 {
-  "name": "@audio-insight/teams-mcp",
+  "name": "@intellibooks/teams-mcp",
   "version": "1.0.0",
   "description": "MCP Server for Microsoft Teams integration",
   "type": "module",

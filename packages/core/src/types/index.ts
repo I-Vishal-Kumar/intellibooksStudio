@@ -1,5 +1,5 @@
 /**
- * Core Types for Audio Insight Platform
+ * Core Types for Intellibooks Studio
  * Shared across all services and packages
  */
 

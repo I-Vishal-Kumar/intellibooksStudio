@@ -1,5 +1,5 @@
 /**
- * Constants for Audio Insight Platform
+ * Constants for Intellibooks Studio
  */
 
 // ============================================
