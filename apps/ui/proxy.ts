@@ -1,17 +1,24 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
 
-// Define public routes that don't require authentication
+// Define public routes that don't require authentication (only sign-up and sign-in)
 const isPublicRoute = createRouteMatcher([
-  "/",
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/api/health(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
+  const { userId } = await auth();
+  
   // Protect all routes except public ones
   if (!isPublicRoute(request)) {
-    await auth.protect();
+    if (!userId) {
+      // Redirect to sign-up if not authenticated
+      const signUpUrl = new URL("/sign-up", request.url);
+      return NextResponse.redirect(signUpUrl);
+    }
+    // User is authenticated, allow access
   }
 });
 
@@ -23,3 +30,4 @@ export const config = {
     "/(api|trpc)(.*)",
   ],
 };
+
