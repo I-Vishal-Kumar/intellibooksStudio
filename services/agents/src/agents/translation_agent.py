@@ -7,10 +7,12 @@ from langchain_core.output_parsers import StrOutputParser
 import logging
 
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "packages" / "agent-framework" / "src"))
+_agent_framework_path = str(Path(__file__).parent.parent.parent.parent.parent / "packages" / "agent-framework" / "src")
+if _agent_framework_path not in sys.path:
+    sys.path.insert(0, _agent_framework_path)
 
-from identity import Skill, TrustLevel, ActionType
-from base import BaseAgent, AgentResult, AgentContext
+from identity.card import Skill, TrustLevel, ActionType
+from base.agent import BaseAgent, AgentResult, AgentContext
 
 from ..llm_factory import create_llm_settings
 

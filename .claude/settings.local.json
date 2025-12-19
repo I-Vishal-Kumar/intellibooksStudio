@@ -15,7 +15,13 @@
       "Bash(./venv/Scripts/python.exe:*)",
       "Bash(dir:*)",
       "Bash(del \"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\data\\\\transcriptions.db\")",
-      "Bash(npm install)"
+      "Bash(npm install)",
+      "Bash(pnpm install:*)",
+      "Bash(copy:*)",
+      "Bash(cp:*)",
+      "Bash(rm:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)"
     ]
   }
 }

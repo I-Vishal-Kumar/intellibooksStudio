@@ -205,41 +205,47 @@ audio-insight-chroma        running (healthy)
 
 ### Step 4: Run the Application
 
-You have two options to run the application:
+You have three options to run the application:
 
-#### Option A: Run Services Individually (Recommended for Development)
+#### Option A: Run All Services at Once (Recommended)
+
+The simplest way to start all services with a single command:
+
+```bash
+pnpm dev:all
+```
+
+This runs the UI (port 3000), Agent Service (port 8001), and RAG Service (port 8002) concurrently with color-coded output.
+
+#### Option B: Run Services Individually
 
 Open separate terminal windows for each service:
 
 **Terminal 1 - Agent Service (Port 8001):**
 ```bash
+pnpm dev:agents
+# Or manually:
 cd services/agents
-pip install -r requirements.txt
 uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
 **Terminal 2 - RAG Service (Port 8002):**
 ```bash
+pnpm dev:rag
+# Or manually:
 cd services/rag
-pip install -r requirements.txt
 uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8002
 ```
 
-**Terminal 3 - RBAC Service (Port 8003):**
+**Terminal 3 - UI (Port 3000):**
 ```bash
-cd services/rbac
-pnpm install
-pnpm dev
-```
-
-**Terminal 4 - UI (Port 3001):**
-```bash
+pnpm dev:ui
+# Or manually:
 cd apps/ui
-pnpm install
 pnpm dev
 ```
 
-#### Option B: Run All Services with Docker Compose
+#### Option C: Run All Services with Docker Compose
 
 ```bash
 # Start everything including application services

@@ -5,6 +5,12 @@ description = "Audio Transcription and Intent Summary Tool with LangChain Agents
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    # Web framework
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "python-multipart>=0.0.12",
+    "websockets>=13.0",
+
     # LangChain ecosystem
     "langchain>=0.3.0",
     "langchain-openai>=0.2.0",
@@ -16,6 +22,11 @@ dependencies = [
     "openai-whisper>=20231117",
     "pydub>=0.25.1",
     "soundfile>=0.12.1",
+
+    # Vector database / RAG
+    "chromadb>=0.4.0",
+    "sentence-transformers>=2.2.0",
+    "numpy>=1.24.0",
 
     # MCP (Model Context Protocol)
     "mcp>=1.0.0",
@@ -45,10 +56,6 @@ dev = [
 ]
 
 ui = [
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.32.0",
-    "python-multipart>=0.0.12",
-    "websockets>=13.0",
     "jinja2>=3.1.0",
 ]
 
@@ -66,3 +73,6 @@ target-version = "py310"
 [tool.black]
 line-length = 100
 target-version = ["py310"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

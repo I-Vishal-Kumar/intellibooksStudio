@@ -6,7 +6,9 @@
   "scripts": {
     "build": "turbo build",
     "dev": "turbo dev",
+    "dev:all": "concurrently --kill-others-on-fail=false -n ui,ws,agents,rag -c blue,cyan,green,yellow \"pnpm dev:ui\" \"pnpm dev:ws\" \"pnpm dev:agents\" \"pnpm dev:rag\"",
     "dev:ui": "turbo dev --filter=@audio-insight/ui",
+    "dev:ws": "cd services/websocket && python -m uvicorn src.main:app --reload --port 8004",
     "dev:agents": "cd services/agents && python -m uvicorn src.api.main:app --reload --port 8001",
     "dev:rag": "cd services/rag && python -m uvicorn src.api.main:app --reload --port 8002",
     "dev:rbac": "turbo dev --filter=@audio-insight/rbac-service",
@@ -23,6 +25,7 @@
     "db:seed": "cd packages/database && python -m src.seed"
   },
   "devDependencies": {
+    "concurrently": "^9.1.0",
     "turbo": "^2.0.0",
     "prettier": "^3.2.0",
     "typescript": "^5.3.0"

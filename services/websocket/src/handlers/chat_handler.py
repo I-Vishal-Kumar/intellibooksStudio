@@ -12,35 +12,21 @@ from ..connection_manager import manager
 
 logger = logging.getLogger(__name__)
 
-# TODO: Replace direct import with Redis pub/sub integration
-# For now, importing directly for testing
-import sys
-from pathlib import Path
-
-# Add agents src directory to path so relative imports work
-# chat_handler.py is at: services/websocket/src/handlers/chat_handler.py
-# We need: services/agents/src (so agents can use relative imports like ..llm_factory)
-agents_src_path = Path(__file__).parent.parent.parent.parent / "agents" / "src"
-if agents_src_path.exists():
-    if str(agents_src_path) not in sys.path:
-        sys.path.insert(0, str(agents_src_path))
-        logger.info(f"Added agents src to path: {agents_src_path}")
-else:
-    logger.warning(f"Agents src path not found: {agents_src_path}")
-
+# Use simple chat agent that works without complex dependencies
 try:
-    # Import from agents.chat_agent (agents is now a package in sys.path)
-    from agents.chat_agent import ChatAgent
+    from .simple_chat_agent import SimpleChatAgent
     _chat_agent = None
-    
+
     def get_chat_agent():
         """Get or create chat agent instance."""
         global _chat_agent
         if _chat_agent is None:
-            _chat_agent = ChatAgent()
+            _chat_agent = SimpleChatAgent()
         return _chat_agent
+
+    logger.info("SimpleChatAgent loaded successfully")
 except ImportError as e:
-    logger.warning(f"ChatAgent not available: {e}. Using demo responses.")
+    logger.warning(f"SimpleChatAgent not available: {e}. Using demo responses.")
     get_chat_agent = None
 
 
