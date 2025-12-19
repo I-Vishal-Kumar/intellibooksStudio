@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Database
-    database_url: str = "postgresql://admin:password@localhost:5432/audio_insight"
+    database_url: str = "postgresql://admin:password@localhost:5432/intellibooks"
 
     # Redis
     redis_url: str = "redis://localhost:6379"
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # Chroma
     chroma_host: str = "localhost"
     chroma_port: int = 8000
-    chroma_collection: str = "audio_insight_transcripts"
+    chroma_collection: str = "intellibooks_knowledge"
 
     # Embeddings
     embedding_model: str = "all-MiniLM-L6-v2"

@@ -1,7 +1,7 @@
 [project]
-name = "audio-insight-websocket-service"
+name = "intellibooks-websocket-service"
 version = "1.0.0"
-description = "WebSocket Service for Audio Insight - Real-time chat messaging"
+description = "WebSocket Service for Intellibooks Studio - Real-time chat messaging"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",

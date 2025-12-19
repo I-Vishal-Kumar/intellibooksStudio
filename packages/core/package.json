@@ -1,7 +1,7 @@
 {
-  "name": "@audio-insight/core",
+  "name": "@intellibooks/core",
   "version": "1.0.0",
-  "description": "Core types, schemas, and utilities for Audio Insight",
+  "description": "Core types, schemas, and utilities for Intellibooks Studio",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",

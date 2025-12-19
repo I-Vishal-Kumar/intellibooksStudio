@@ -1,5 +1,5 @@
 {
-  "name": "@audio-insight/database-mcp",
+  "name": "@intellibooks/database-mcp",
   "version": "1.0.0",
   "description": "MCP Server for database operations",
   "type": "module",

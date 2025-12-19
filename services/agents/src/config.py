@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Database
-    database_url: str = "postgresql://admin:password@localhost:5432/audio_insight"
+    database_url: str = "postgresql://admin:password@localhost:5432/intellibooks"
 
     # Redis
     redis_url: str = "redis://localhost:6379"

@@ -21,9 +21,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Audio Insight - AI-Powered Audio Analysis",
+  title: "Intellibooks Studio - AI-Powered Document Intelligence",
   description:
-    "Transcribe, translate, summarize, and extract insights from your audio files with advanced AI agents.",
+    "Transform your documents and audio with AI agents. Transcription, translation, summarization, RAG, and intelligent knowledge extraction.",
 };
 
 export default function RootLayout({

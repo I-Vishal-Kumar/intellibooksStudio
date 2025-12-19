@@ -1,6 +1,6 @@
 /**
- * @audio-insight/core
- * Core types, schemas, utilities, and constants for Audio Insight Platform
+ * @intellibooks/core
+ * Core types, schemas, utilities, and constants for Intellibooks Studio
  */
 
 // Types

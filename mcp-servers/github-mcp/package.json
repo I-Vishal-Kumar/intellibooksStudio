@@ -1,5 +1,5 @@
 {
-  "name": "@audio-insight/github-mcp",
+  "name": "@intellibooks/github-mcp",
   "version": "1.0.0",
   "description": "MCP Server for GitHub integration",
   "type": "module",

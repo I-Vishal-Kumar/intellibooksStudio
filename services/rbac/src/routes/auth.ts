@@ -3,7 +3,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { authenticate, authorize } from '@audio-insight/auth';
+import { authenticate, authorize } from '@intellibooks/auth';
 import type { UserService } from '../services/user';
 import type { AuthorizationService } from '../services/authorization';
 

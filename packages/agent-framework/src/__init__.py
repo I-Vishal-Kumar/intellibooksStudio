@@ -1,7 +1,7 @@
 """
-@audio-insight/agent-framework
+@intellibooks/agent-framework
 
-Agent Framework with Identity Cards and DNA Blueprint for Audio Insight Platform.
+Agent Framework with Identity Cards and DNA Blueprint for Intellibooks Studio.
 
 This package provides:
 - Agent Identity Cards for identification and trust management

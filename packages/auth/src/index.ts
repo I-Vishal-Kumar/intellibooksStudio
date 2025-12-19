@@ -1,7 +1,7 @@
 /**
- * @audio-insight/auth
+ * @intellibooks/auth
  *
- * Authentication and authorization package with Clerk integration
+ * Authentication and authorization package with Clerk integration for Intellibooks Studio
  */
 
 // Types
