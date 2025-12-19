@@ -97,6 +97,8 @@ intellibooks-studio/
 | **pnpm** | 8+ | `npm install -g pnpm` |
 | **Docker** | Latest | [docker.com](https://docker.com/) |
 | **FFmpeg** | Latest | Required for audio processing |
+| **Tesseract OCR** | 5.x | Required for scanned PDF OCR |
+| **Poppler** | Latest | Required for PDF to image conversion |
 
 ### Installing FFmpeg
 
@@ -114,6 +116,54 @@ brew install ffmpeg
 ```bash
 sudo apt update && sudo apt install ffmpeg
 ```
+
+### Installing Tesseract OCR (Required for Scanned PDF Support)
+
+Tesseract OCR is required to extract text from scanned/image-based PDFs.
+
+**Windows (with winget):**
+```powershell
+winget install UB-Mannheim.TesseractOCR
+```
+
+After installation, Tesseract should be available at:
+- `C:\Program Files\Tesseract-OCR\tesseract.exe`
+
+**macOS:**
+```bash
+brew install tesseract
+```
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt update && sudo apt install tesseract-ocr
+```
+
+### Installing Poppler (Required for Scanned PDF Support)
+
+Poppler provides the `pdftoppm` utility needed to convert PDF pages to images for OCR.
+
+**Windows (with winget):**
+```powershell
+winget install poppler
+```
+
+After installation, Poppler binaries should be available at one of these locations:
+- `C:\Users\<username>\AppData\Local\Microsoft\WinGet\Packages\oschwartz10612.Poppler_...\poppler-X.XX.X\Library\bin`
+- `C:\Program Files\poppler\Library\bin`
+- `C:\Program Files\poppler\bin`
+
+**macOS:**
+```bash
+brew install poppler
+```
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt update && sudo apt install poppler-utils
+```
+
+> **Note:** After installing Tesseract and Poppler on Windows, you may need to restart your terminal/PowerShell for the PATH changes to take effect. The RAG service will automatically detect these tools at their default installation paths.
 
 ---
 
@@ -372,7 +422,40 @@ cd infrastructure/docker
 docker-compose up -d rabbitmq
 ```
 
-**5. Port already in use**
+**5. Scanned PDF OCR failed - Tesseract not found**
+```
+Error: tesseract is not installed or it's not in your PATH
+```
+Solution: Install Tesseract OCR:
+```powershell
+# Windows
+winget install UB-Mannheim.TesseractOCR
+
+# macOS
+brew install tesseract
+
+# Linux
+sudo apt install tesseract-ocr
+```
+
+**6. Scanned PDF OCR failed - Poppler not found**
+```
+Error: Unable to get page count. Is poppler installed and in PATH?
+```
+Solution: Install Poppler:
+```powershell
+# Windows
+winget install poppler
+
+# macOS
+brew install poppler
+
+# Linux
+sudo apt install poppler-utils
+```
+After installation on Windows, restart your terminal for PATH changes to take effect.
+
+**7. Port already in use**
 ```
 Error: Port 8001 is already in use
 ```

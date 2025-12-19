@@ -318,31 +318,57 @@ export default function KnowledgePage() {
         {uploadProgress.length > 0 && (
           <div className="p-3 border-b border-gray-200 space-y-2">
             {uploadProgress.map((progress, i) => (
-              <div key={i} className="bg-white rounded-lg p-2 border border-gray-200">
-                <div className="flex items-center gap-2">
+              <div key={i} className="bg-white rounded-xl p-3 border border-gray-200 shadow-sm">
+                <div className="flex items-center gap-3">
                   {progress.status === "uploading" && (
-                    <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
+                    <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                      <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
+                    </div>
                   )}
                   {progress.status === "processing" && (
-                    <Loader2 className="w-4 h-4 text-purple-500 animate-spin" />
+                    <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center">
+                      <Loader2 className="w-4 h-4 text-purple-600 animate-spin" />
+                    </div>
                   )}
                   {progress.status === "done" && (
-                    <CheckCircle className="w-4 h-4 text-green-500" />
+                    <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
+                      <CheckCircle className="w-4 h-4 text-green-600" />
+                    </div>
                   )}
                   {progress.status === "error" && (
-                    <AlertCircle className="w-4 h-4 text-red-500" />
+                    <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center">
+                      <AlertCircle className="w-4 h-4 text-red-600" />
+                    </div>
                   )}
-                  <span className="text-xs text-gray-600 truncate flex-1">
-                    {progress.filename}
-                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {progress.filename}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {progress.status === "uploading" && "Uploading..."}
+                      {progress.status === "processing" && "Processing & extracting text..."}
+                      {progress.status === "done" && `${progress.chunks} chunks indexed`}
+                      {progress.status === "error" && "Failed"}
+                    </p>
+                  </div>
                 </div>
-                {progress.status === "done" && progress.chunks && (
-                  <p className="text-xs text-green-600 mt-1">
-                    {progress.chunks} chunks created
-                  </p>
+                {(progress.status === "uploading" || progress.status === "processing") && (
+                  <div className="mt-2">
+                    <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          progress.status === "uploading"
+                            ? "bg-blue-500 w-1/3"
+                            : "bg-purple-500 w-2/3 animate-pulse"
+                        }`}
+                      />
+                    </div>
+                  </div>
                 )}
-                {progress.status === "error" && (
-                  <p className="text-xs text-red-600 mt-1">{progress.error}</p>
+                {progress.status === "error" && progress.error && (
+                  <p className="text-xs text-red-600 mt-2 bg-red-50 p-2 rounded-lg">
+                    {progress.error}
+                  </p>
                 )}
               </div>
             ))}

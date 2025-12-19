@@ -31,7 +31,11 @@
       "Bash(.venvScriptspip.exe install pypdf python-docx beautifulsoup4 --quiet)",
       "Bash(\".venv\\\\Scripts\\\\pip.exe\" install pypdf python-docx beautifulsoup4)",
       "Bash(.venvScriptspip.exe install pika)",
-      "Bash(.venv/Scripts/pip.exe install:*)"
+      "Bash(.venv/Scripts/pip.exe install:*)",
+      "Bash(docker ps:*)",
+      "Bash(.venvScriptspip.exe install ray[client])",
+      "Bash(.venv/Scripts/python.exe:*)",
+      "Bash(where:*)"
     ]
   }
 }

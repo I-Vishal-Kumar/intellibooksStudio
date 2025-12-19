@@ -357,14 +357,16 @@ class DocumentProcessor:
             return content.decode('utf-8', errors='ignore')
 
     def _extract_pdf(self, content: bytes) -> str:
-        """Extract text from PDF."""
+        """Extract text from PDF. Falls back to OCR for scanned PDFs."""
         try:
             import pypdf
             reader = pypdf.PdfReader(io.BytesIO(content))
             text_parts = []
+            pages_without_text = []
 
             logger.info(f"PDF has {len(reader.pages)} pages")
 
+            # First try standard text extraction
             for i, page in enumerate(reader.pages):
                 try:
                     text = page.extract_text()
@@ -372,10 +374,18 @@ class DocumentProcessor:
                         text_parts.append(text.strip())
                         logger.debug(f"Page {i+1}: extracted {len(text)} chars")
                     else:
-                        logger.warning(f"Page {i+1}: no text extracted (may be scanned/image)")
+                        pages_without_text.append(i)
                 except Exception as page_err:
                     logger.warning(f"Page {i+1}: extraction error - {page_err}")
-                    continue
+                    pages_without_text.append(i)
+
+            # If most pages have no text, try OCR
+            if len(pages_without_text) > len(reader.pages) * 0.5:
+                logger.info(f"PDF appears to be scanned ({len(pages_without_text)}/{len(reader.pages)} pages without text). Attempting OCR...")
+                ocr_text = self._extract_pdf_ocr(content)
+                if ocr_text:
+                    return ocr_text
+                logger.warning("OCR extraction failed or returned no text")
 
             result = "\n\n".join(text_parts)
             logger.info(f"Total extracted: {len(result)} chars from {len(text_parts)} pages")
@@ -385,6 +395,75 @@ class DocumentProcessor:
         except Exception as e:
             logger.error(f"PDF extraction failed: {e}")
             raise
+
+    def _extract_pdf_ocr(self, content: bytes) -> str:
+        """Extract text from scanned PDF using OCR."""
+        try:
+            from pdf2image import convert_from_bytes
+            import pytesseract
+            from PIL import Image
+
+            # Configure Tesseract path for Windows
+            import platform
+            if platform.system() == "Windows":
+                tesseract_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+                if os.path.exists(tesseract_path):
+                    pytesseract.pytesseract.tesseract_cmd = tesseract_path
+
+            logger.info("Converting PDF to images for OCR...")
+
+            # Find poppler path for Windows
+            poppler_path = None
+            if platform.system() == "Windows":
+                # Check common installation paths
+                possible_paths = [
+                    r"C:\Users\JIPL\AppData\Local\Microsoft\WinGet\Packages\oschwartz10612.Poppler_Microsoft.Winget.Source_8wekyb3d8bbwe\poppler-25.07.0\Library\bin",
+                    r"C:\Program Files\poppler\Library\bin",
+                    r"C:\Program Files\poppler\bin",
+                ]
+                for path in possible_paths:
+                    if os.path.exists(path):
+                        poppler_path = path
+                        logger.info(f"Found poppler at: {path}")
+                        break
+
+            # Convert PDF pages to images
+            try:
+                if poppler_path:
+                    images = convert_from_bytes(content, dpi=200, poppler_path=poppler_path)
+                else:
+                    images = convert_from_bytes(content, dpi=200)
+            except Exception as e:
+                logger.warning(f"pdf2image failed (poppler may not be installed): {e}")
+                logger.info("Install poppler: winget install poppler (Windows) or brew install poppler (Mac)")
+                return ""
+
+            text_parts = []
+            for i, image in enumerate(images):
+                try:
+                    # Run OCR on each page
+                    text = pytesseract.image_to_string(image)
+                    if text and text.strip():
+                        text_parts.append(text.strip())
+                        logger.debug(f"OCR Page {i+1}: extracted {len(text)} chars")
+                    else:
+                        logger.debug(f"OCR Page {i+1}: no text found")
+                except Exception as ocr_err:
+                    logger.warning(f"OCR Page {i+1}: error - {ocr_err}")
+                    continue
+
+            result = "\n\n".join(text_parts)
+            logger.info(f"OCR extracted: {len(result)} chars from {len(text_parts)} pages")
+            return result
+
+        except ImportError as e:
+            logger.warning(f"OCR dependencies not installed: {e}")
+            logger.info("Install: pip install pytesseract pdf2image Pillow")
+            logger.info("Also install Tesseract OCR: winget install tesseract (Windows)")
+            return ""
+        except Exception as e:
+            logger.error(f"OCR extraction failed: {e}")
+            return ""
 
     def _extract_docx(self, content: bytes) -> str:
         """Extract text from DOCX."""
@@ -533,40 +612,108 @@ class DocumentProcessor:
 
 # ============ Ray Parallel Processing ============
 
-def init_ray_if_available(config: RAGConfig) -> bool:
-    """Initialize Ray if available and enabled.
+class RayClusterClient:
+    """HTTP client for communicating with Ray Docker cluster.
 
-    On Windows, Ray doesn't work with venv, so we connect to Docker Ray cluster.
-    The Docker cluster exposes Ray Client on port 10001.
+    This bypasses the need for the ray Python package by using Ray's REST APIs.
+    Works with Python 3.14+ where the ray package isn't available.
     """
-    if not config.use_ray:
+
+    def __init__(self, dashboard_url: str = "http://localhost:8265"):
+        self.dashboard_url = dashboard_url.rstrip("/")
+        self._connected = False
+
+    def check_connection(self) -> bool:
+        """Check if Ray cluster is available."""
+        try:
+            import urllib.request
+            import urllib.error
+
+            req = urllib.request.Request(
+                f"{self.dashboard_url}/api/cluster_status",
+                method="GET"
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                if response.status == 200:
+                    self._connected = True
+                    return True
+        except Exception as e:
+            logger.debug(f"Ray cluster not available: {e}")
         return False
 
+    def get_cluster_info(self) -> Optional[Dict[str, Any]]:
+        """Get cluster info from Ray dashboard."""
+        try:
+            import urllib.request
+            import urllib.error
+
+            req = urllib.request.Request(
+                f"{self.dashboard_url}/api/cluster_status",
+                method="GET"
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                return data
+        except Exception as e:
+            logger.error(f"Failed to get cluster info: {e}")
+            return None
+
+
+def init_ray_if_available(config: RAGConfig) -> Tuple[bool, Optional[RayClusterClient]]:
+    """Initialize Ray connection if available and enabled.
+
+    This uses HTTP to communicate with Ray Docker cluster, bypassing the need
+    for the ray Python package (which doesn't support Python 3.14+ or Windows venv).
+
+    Returns:
+        Tuple of (is_available, ray_client)
+    """
+    if not config.use_ray:
+        return False, None
+
+    # First try the ray Python package (works on Linux/Mac with Python <= 3.12)
     try:
         import ray
         if not ray.is_initialized():
-            # Connect to Docker Ray cluster via Ray Client
-            # ray_address format: "ray://localhost:10001"
             try:
                 ray.init(address=config.ray_address, ignore_reinit_error=True)
-                logger.info(f"Connected to Ray cluster at {config.ray_address}")
+                logger.info(f"Connected to Ray cluster at {config.ray_address} using ray package")
+                return True, None  # None means use ray package directly
             except Exception as connect_err:
-                # Fallback: try local init (works on Linux/Mac)
-                logger.warning(f"Failed to connect to Ray cluster: {connect_err}")
-                logger.info("Attempting local Ray initialization...")
-                ray.init(num_cpus=config.ray_num_cpus, ignore_reinit_error=True)
-                logger.info(f"Ray initialized locally with {config.ray_num_cpus} CPUs")
-        return True
+                logger.warning(f"Failed to connect via ray package: {connect_err}")
     except ImportError:
-        logger.warning("Ray not installed, falling back to ThreadPoolExecutor")
-        return False
+        logger.info("Ray package not installed, trying HTTP connection...")
     except Exception as e:
-        logger.warning(f"Ray initialization failed: {e}, falling back to ThreadPoolExecutor")
-        return False
+        logger.warning(f"Ray package init failed: {e}")
+
+    # Fallback: Use HTTP connection to Ray dashboard
+    # Extract dashboard URL from ray_address (ray://localhost:10001 -> http://localhost:8265)
+    dashboard_url = "http://localhost:8265"
+    if "localhost" not in config.ray_address and "127.0.0.1" not in config.ray_address:
+        # Extract host from ray://host:port
+        host = config.ray_address.replace("ray://", "").split(":")[0]
+        dashboard_url = f"http://{host}:8265"
+
+    ray_client = RayClusterClient(dashboard_url)
+    if ray_client.check_connection():
+        cluster_info = ray_client.get_cluster_info()
+        if cluster_info:
+            logger.info(f"Connected to Ray cluster via HTTP at {dashboard_url}")
+            # Handle different response formats
+            if isinstance(cluster_info, dict):
+                status = cluster_info.get("data", {}).get("clusterStatus", "connected") if "data" in cluster_info else "connected"
+                logger.info(f"Ray cluster available (HTTP mode)")
+            return True, ray_client
+
+    logger.warning("Ray cluster not available, falling back to ThreadPoolExecutor")
+    return False, None
 
 
 def create_ray_process_task(config: RAGConfig):
-    """Create Ray remote task for document processing."""
+    """Create Ray remote task for document processing.
+
+    Only works if ray package is available.
+    """
     try:
         import ray
 
@@ -669,8 +816,9 @@ class IntelliBooksPipeline:
         self.embedding_service = EmbeddingService(self.config.embedding_model)
 
         # Initialize Ray if enabled
-        self.ray_available = init_ray_if_available(self.config)
-        self.ray_task = create_ray_process_task(self.config) if self.ray_available else None
+        # Returns (is_available, http_client) - http_client is None if using ray package
+        self.ray_available, self.ray_http_client = init_ray_if_available(self.config)
+        self.ray_task = create_ray_process_task(self.config) if self.ray_available and self.ray_http_client is None else None
 
         # Initialize RabbitMQ if enabled
         self.rabbitmq = None
@@ -900,6 +1048,17 @@ Answer:"""),
     async def get_stats(self) -> Dict[str, Any]:
         """Get pipeline statistics."""
         count = await self.vector_store.count()
+
+        # Determine Ray connection mode
+        ray_mode = "disabled"
+        if self.ray_available:
+            if self.ray_http_client:
+                ray_mode = "http"  # Connected via HTTP to Docker cluster
+            elif self.ray_task:
+                ray_mode = "native"  # Using ray package directly
+            else:
+                ray_mode = "connected"  # Connected but no task available
+
         return {
             "total_chunks": count,
             "collection": self.config.chroma_collection,
@@ -907,5 +1066,6 @@ Answer:"""),
             "chroma_host": self.config.chroma_host,
             "chroma_port": self.config.chroma_port,
             "ray_enabled": self.ray_available,
+            "ray_mode": ray_mode,
             "rabbitmq_enabled": self.rabbitmq is not None,
         }
