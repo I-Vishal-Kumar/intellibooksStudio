@@ -5,7 +5,7 @@ Combines Identity Card and DNA Blueprint into a cohesive agent.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, List, TypeVar, Generic
+from typing import Any, Dict, Optional, List, TypeVar, Generic, Callable, Union
 from pydantic import BaseModel, Field
 from datetime import datetime
 import logging
@@ -100,6 +100,10 @@ class BaseAgent(ABC):
         domain: str = "audio-processing",
         environment: str = "development",
         dna_blueprint: Optional[AgentDNABlueprint] = None,
+        # LLM configuration
+        llm_instance: Optional[Any] = None,
+        llm_settings: Optional[Dict[str, Any]] = None,
+        default_temperature: float = 0.7,
         **kwargs,
     ):
         """
@@ -115,6 +119,13 @@ class BaseAgent(ABC):
             domain: Operational domain
             environment: Deployment environment
             dna_blueprint: Optional DNA blueprint (uses standard if not provided)
+            llm_instance: Optional pre-configured LLM instance to use
+            llm_settings: Optional dict with LLM configuration:
+                - provider: "openai", "anthropic", or "openrouter"
+                - api_key: API key for the provider
+                - model: Model name
+                - base_url: Optional base URL (for OpenRouter)
+            default_temperature: Default temperature for LLM (can be overridden per agent)
         """
         self.name = name
         self.logger = logging.getLogger(f"agent.{name}")
@@ -132,6 +143,12 @@ class BaseAgent(ABC):
 
         # Set DNA blueprint
         self._dna = dna_blueprint or create_standard_blueprint()
+
+        # LLM configuration
+        self._llm_instance = llm_instance
+        self._llm_settings = llm_settings or {}
+        self._default_temperature = default_temperature
+        self._llm = None  # Lazy-loaded LLM instance
 
         # Execution state
         self._is_initialized = False
@@ -179,6 +196,103 @@ class BaseAgent(ABC):
     def dna(self) -> AgentDNABlueprint:
         """Get the agent's DNA blueprint."""
         return self._dna
+
+    def _create_llm(self, temperature: Optional[float] = None, structured_output: Optional[Any] = None) -> Any:
+        """
+        Create an LLM instance.
+        
+        This method can be overridden by subclasses to customize LLM creation.
+        By default, it creates an LLM based on llm_settings or uses the provided llm_instance.
+        
+        Args:
+            temperature: Temperature for the LLM (uses default_temperature if not provided)
+            structured_output: Optional Pydantic model for structured output
+            
+        Returns:
+            LLM instance
+        """
+        # If a pre-configured LLM instance was provided, use it
+        if self._llm_instance is not None:
+            if structured_output is not None:
+                return self._llm_instance.with_structured_output(structured_output)
+            return self._llm_instance
+        
+        # Otherwise, create LLM from settings
+        if not self._llm_settings:
+            raise ValueError(
+                "No LLM instance or settings provided. "
+                "Either pass llm_instance or llm_settings to __init__."
+            )
+        
+        provider = self._llm_settings.get("provider", "openrouter")
+        api_key = self._llm_settings.get("api_key", "")
+        model = self._llm_settings.get("model", "gpt-4o")
+        base_url = self._llm_settings.get("base_url")
+        temp = temperature if temperature is not None else self._default_temperature
+        
+        # Import LLM classes (lazy import to avoid dependency issues)
+        try:
+            if provider == "openai":
+                from langchain_openai import ChatOpenAI  # type: ignore
+                llm = ChatOpenAI(
+                    model=model,
+                    api_key=api_key,
+                    temperature=temp,
+                )
+            elif provider == "anthropic":
+                from langchain_anthropic import ChatAnthropic  # type: ignore
+                llm = ChatAnthropic(
+                    model=model,
+                    api_key=api_key,
+                    temperature=temp,
+                )
+            else:  # openrouter or default
+                from langchain_openai import ChatOpenAI  # type: ignore
+                llm = ChatOpenAI(
+                    model=model,
+                    api_key=api_key,
+                    base_url=base_url or "https://openrouter.ai/api/v1",
+                    temperature=temp,
+                )
+            
+            # Apply structured output if requested
+            if structured_output is not None:
+                return llm.with_structured_output(structured_output)
+            
+            return llm
+            
+        except ImportError as e:
+            raise ImportError(
+                f"Failed to import LLM library. Make sure langchain-openai or langchain-anthropic is installed. {e}"
+            )
+
+    @property
+    def llm(self) -> Any:
+        """
+        Get the LLM instance (lazy-loaded).
+        
+        Override _create_llm() to customize LLM creation, or use get_llm()
+        with specific parameters for structured output or custom temperature.
+        """
+        if self._llm is None:
+            self._llm = self._create_llm()
+        return self._llm
+
+    def get_llm(self, temperature: Optional[float] = None, structured_output: Optional[Any] = None) -> Any:
+        """
+        Get an LLM instance with custom parameters.
+        
+        Use this method when you need an LLM with specific temperature or structured output.
+        This creates a new instance each time (doesn't cache).
+        
+        Args:
+            temperature: Temperature for the LLM
+            structured_output: Optional Pydantic model for structured output
+            
+        Returns:
+            LLM instance
+        """
+        return self._create_llm(temperature=temperature, structured_output=structured_output)
 
     async def initialize(self) -> None:
         """
