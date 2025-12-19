@@ -20,7 +20,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -51,7 +50,10 @@ coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
-
+node_modules/
+.claude/
+pnpm-lock.yaml
+.turbo/
 # IDEs
 .idea/
 *.swp

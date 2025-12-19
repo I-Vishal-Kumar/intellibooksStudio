@@ -9,8 +9,8 @@ import { ResultsPanel } from "@/components/ResultsPanel";
 import { Mic, FileAudio, Brain, Languages } from "lucide-react";
 
 export default function Home() {
-  const { isSignedIn, user } = useUser();
-  const [processingResult, setProcessingResult] = useState<any>(null);
+  // const { isSignedIn, user } = useUser();
+  // const [processingResult, setProcessingResult] = useState<any>(null);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
@@ -26,7 +26,7 @@ export default function Home() {
                 Audio Insight
               </span>
             </div>
-
+{/* 
             <div className="flex items-center gap-4">
               {isSignedIn ? (
                 <UserButton afterSignOutUrl="/" />
@@ -35,7 +35,7 @@ export default function Home() {
                   <button className="btn-primary">Sign In</button>
                 </SignInButton>
               )}
-            </div>
+            </div> */}
           </div>
         </div>
       </header>
@@ -99,12 +99,12 @@ export default function Home() {
               <ChatInterface />
             </div>
 
-            {processingResult && (
+            {/* {processingResult && (
               <div className="card">
                 <h2 className="text-lg font-semibold mb-4">Results</h2>
                 <ResultsPanel result={processingResult} />
               </div>
-            )}
+            )} */}
           </div>
         </div>
       </main>
