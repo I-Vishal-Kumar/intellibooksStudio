@@ -3,8 +3,6 @@
 from typing import Optional, Any, List
 from pathlib import Path
 from pydantic import BaseModel, Field
-from langchain_openai import ChatOpenAI
-from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
 import logging
 
@@ -14,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "pack
 from identity import Skill, TrustLevel, ActionType
 from base import BaseAgent, AgentResult, AgentContext
 
-from ..config import get_settings
+from ..llm_factory import create_llm_settings
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +29,6 @@ class SummarizationAgent(BaseAgent):
     """Agent for generating summaries with key points and action items."""
 
     def __init__(self):
-        settings = get_settings()
-
         skills = [
             Skill(
                 name="summarization",
@@ -50,36 +46,17 @@ class SummarizationAgent(BaseAgent):
             skills=skills,
             supported_actions=[ActionType.READ, ActionType.EXECUTE],
             trust_level=TrustLevel.VERIFIED,
+            llm_settings=create_llm_settings(),
+            default_temperature=0.5,  # Summarization works well with moderate temperature
         )
 
-        self.settings = settings
-        self._llm = None
-
-    @property
-    def llm(self):
-        """Lazy load LLM with structured output."""
-        if self._llm is None:
-            if self.settings.default_llm_provider.value == "openai":
-                base_llm = ChatOpenAI(
-                    model="gpt-4o",
-                    api_key=self.settings.openai_api_key,
-                    temperature=0.5,
-                )
-            elif self.settings.default_llm_provider.value == "anthropic":
-                base_llm = ChatAnthropic(
-                    model="claude-sonnet-4-20250514",
-                    api_key=self.settings.anthropic_api_key,
-                    temperature=0.5,
-                )
-            else:
-                base_llm = ChatOpenAI(
-                    model=self.settings.openrouter_model,
-                    api_key=self.settings.openrouter_api_key,
-                    base_url="https://openrouter.ai/api/v1",
-                    temperature=0.5,
-                )
-            self._llm = base_llm.with_structured_output(SummaryOutput)
-        return self._llm
+    def _create_llm(self, temperature: Optional[float] = None, structured_output: Optional[Any] = None):
+        """Override to always use structured output for summaries."""
+        # Use temperature 0.5 for summarization (can be overridden)
+        temp = temperature if temperature is not None else 0.5
+        # Always use SummaryOutput unless explicitly overridden
+        output_schema = structured_output if structured_output is not None else SummaryOutput
+        return super()._create_llm(temperature=temp, structured_output=output_schema)
 
     async def execute(
         self,
@@ -140,6 +117,7 @@ For action items (if applicable):
                 ("human", "Please analyze and summarize the following text:\n\n{text}"),
             ])
 
+            # Use base LLM property which will use structured output from _create_llm override
             chain = prompt | self.llm
             summary_output: SummaryOutput = await chain.ainvoke({"text": text})
 
@@ -152,7 +130,6 @@ For action items (if applicable):
                 "summary_type": summary_type,
             }
             result.metadata = {
-                "model": self.settings.openrouter_model,
                 "input_length": len(text),
             }
 

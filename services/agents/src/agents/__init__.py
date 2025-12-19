@@ -5,6 +5,7 @@ from .translation_agent import TranslationAgent
 from .summarization_agent import SummarizationAgent
 from .intent_agent import IntentDetectionAgent
 from .keyword_agent import KeywordExtractionAgent
+from .chat_agent import ChatAgent
 
 __all__ = [
     "TranscriptionAgent",
@@ -12,4 +13,5 @@ __all__ = [
     "SummarizationAgent",
     "IntentDetectionAgent",
     "KeywordExtractionAgent",
+    "ChatAgent",
 ]

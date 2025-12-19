@@ -2,8 +2,6 @@
 
 from typing import Optional, Any, List
 from pathlib import Path
-from langchain_openai import ChatOpenAI
-from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 import logging
@@ -14,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "pack
 from identity import Skill, TrustLevel, ActionType
 from base import BaseAgent, AgentResult, AgentContext
 
-from ..config import get_settings
+from ..llm_factory import create_llm_settings
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +32,6 @@ class TranslationAgent(BaseAgent):
     """Agent for translating text to multiple languages."""
 
     def __init__(self):
-        settings = get_settings()
-
         skills = [
             Skill(
                 name="translation",
@@ -53,35 +49,9 @@ class TranslationAgent(BaseAgent):
             skills=skills,
             supported_actions=[ActionType.READ, ActionType.EXECUTE],
             trust_level=TrustLevel.VERIFIED,
+            llm_settings=create_llm_settings(),
+            default_temperature=0.3,  # Translation needs moderate creativity
         )
-
-        self.settings = settings
-        self._llm = None
-
-    @property
-    def llm(self):
-        """Lazy load LLM."""
-        if self._llm is None:
-            if self.settings.default_llm_provider.value == "openai":
-                self._llm = ChatOpenAI(
-                    model="gpt-4o",
-                    api_key=self.settings.openai_api_key,
-                    temperature=0.3,
-                )
-            elif self.settings.default_llm_provider.value == "anthropic":
-                self._llm = ChatAnthropic(
-                    model="claude-sonnet-4-20250514",
-                    api_key=self.settings.anthropic_api_key,
-                    temperature=0.3,
-                )
-            else:
-                self._llm = ChatOpenAI(
-                    model=self.settings.openrouter_model,
-                    api_key=self.settings.openrouter_api_key,
-                    base_url="https://openrouter.ai/api/v1",
-                    temperature=0.3,
-                )
-        return self._llm
 
     async def execute(
         self,
@@ -134,7 +104,9 @@ Guidelines:
                     ("human", "{text}"),
                 ])
 
-                chain = prompt | self.llm | StrOutputParser()
+                # Use base LLM with translation temperature
+                llm = self.get_llm(temperature=0.3)
+                chain = prompt | llm | StrOutputParser()
                 translated_text = await chain.ainvoke({"text": text})
 
                 translations.append({
@@ -149,9 +121,7 @@ Guidelines:
                 "source_text": text[:200] + "..." if len(text) > 200 else text,
                 "languages_translated": len(translations),
             }
-            result.metadata = {
-                "model": self.settings.openrouter_model,
-            }
+            result.metadata = {}
 
         except Exception as e:
             self.logger.exception("Translation failed")
