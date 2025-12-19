@@ -37,9 +37,31 @@ RAG (Retrieval-Augmented Generation) Pipeline Service for Intellibooks Studio wi
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.10 - 3.12 (Ray requires Python < 3.13)
 - Docker & Docker Compose
-- (Optional) Ray cluster for distributed processing
+- (Optional) Tesseract OCR for scanned PDFs
+- (Optional) Poppler for PDF to image conversion
+
+### System Dependencies (for OCR)
+
+**Windows:**
+```bash
+# Install Tesseract OCR
+winget install tesseract
+
+# Install Poppler
+winget install poppler
+```
+
+**macOS:**
+```bash
+brew install tesseract poppler
+```
+
+**Linux:**
+```bash
+sudo apt-get install tesseract-ocr poppler-utils
+```
 
 ### Installation
 
@@ -54,7 +76,7 @@ source .venv/bin/activate  # Linux/Mac
 # Install dependencies
 pip install -e "."
 
-# Install optional Ray support (Linux/Mac only)
+# Install Ray support (Python 3.12 or lower)
 pip install -e ".[ray]"
 ```
 
@@ -211,9 +233,9 @@ DELETE /api/documents/{document_id}
 
 ## Distributed Processing
 
-### Ray (Docker-based)
+### Ray
 
-On Windows, Ray doesn't work with venv. Use Docker:
+Ray requires Python 3.12 or lower. The Docker cluster uses Ray 2.52.0.
 
 ```bash
 # Start Ray cluster
@@ -225,6 +247,11 @@ open http://localhost:8265
 ```
 
 The service connects to Ray at `ray://localhost:10001`.
+
+**Important:** Your local Ray version must match the Docker cluster version (2.52.x). Install with:
+```bash
+pip install "ray[client]>=2.52.0"
+```
 
 ### RabbitMQ
 
@@ -296,11 +323,12 @@ Handles document parsing and chunking:
 
 ### ChromaDBStore
 
-Vector store wrapper:
+Vector store using ChromaDB's REST API v2:
 
+- Direct HTTP client (no chromadb Python package required)
 - Document embedding and storage
-- Similarity search
-- Filtering support
+- Similarity search with filtering
+- Works with ChromaDB Docker container
 
 ### EmbeddingService
 
@@ -321,6 +349,16 @@ Solution: Ensure ChromaDB container is running:
 docker-compose up -d chroma
 ```
 
+### ChromaDB API Version Error
+```
+Error: The v1 API is deprecated. Please use /v2 apis
+```
+Solution: The service uses ChromaDB API v2. Ensure you're using the latest `chromadb/chroma:latest` Docker image:
+```bash
+docker-compose pull chroma
+docker-compose up -d chroma
+```
+
 ### Ray Connection Failed
 ```
 Error: Failed to connect to Ray cluster
@@ -328,6 +366,15 @@ Error: Failed to connect to Ray cluster
 Solution: Start Docker Ray cluster:
 ```bash
 docker-compose --profile ray up -d
+```
+
+### Ray Version Mismatch
+```
+Error: Version mismatch: The cluster was started with Ray: X.X.X
+```
+Solution: Ensure your local Ray version matches the Docker cluster (2.52.x):
+```bash
+pip install "ray[client]==2.52.0"
 ```
 
 ### RabbitMQ Connection Failed
@@ -346,6 +393,23 @@ Error: pypdf not installed
 Solution: Install document processing dependencies:
 ```bash
 pip install pypdf python-docx beautifulsoup4
+```
+
+### OCR Not Working
+```
+Error: pytesseract.TesseractNotFoundError
+```
+Solution: Install Tesseract OCR and Poppler:
+```bash
+# Windows
+winget install tesseract
+winget install poppler
+
+# macOS
+brew install tesseract poppler
+
+# Linux
+sudo apt-get install tesseract-ocr poppler-utils
 ```
 
 ## License

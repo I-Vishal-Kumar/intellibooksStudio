@@ -3,7 +3,7 @@ name = "intellibooks-rag-service"
 version = "1.0.0"
 description = "RAG Pipeline Service for Intellibooks Studio with Ray, RabbitMQ, and ChromaDB"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 license = { text = "MIT" }
 authors = [
     { name = "Intellibooks Team" }
@@ -15,8 +15,8 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
 
-    # Vector database
-    "chromadb>=0.4.0",
+    # HTTP client for ChromaDB REST API (no chromadb package needed)
+    "httpx>=0.27.0",
 
     # Embeddings
     "sentence-transformers>=2.2.0",
@@ -50,8 +50,8 @@ dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "python-dotenv>=1.0.0",
-    "httpx>=0.27.0",
     "aiofiles>=23.0.0",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
@@ -64,8 +64,8 @@ dev = [
 ]
 
 ray = [
-    # Ray for distributed processing (Linux/Mac only, use Docker on Windows)
-    "ray[default]>=2.9.0",
+    # Ray for distributed processing (requires Python 3.12 or lower)
+    "ray[client]>=2.52.0",
 ]
 
 [project.urls]
