@@ -11,17 +11,32 @@ from datetime import datetime
 import logging
 import uuid
 
-from ..identity import (
-    AgentIdentityCard,
-    CapabilitiesManifest,
-    Skill,
-    TrustLevel,
-    ActionType,
-)
-from ..dna import (
-    AgentDNABlueprint,
-    create_standard_blueprint,
-)
+try:
+    # Try relative imports first (for package installation)
+    from ..identity import (
+        AgentIdentityCard,
+        CapabilitiesManifest,
+        Skill,
+        TrustLevel,
+        ActionType,
+    )
+    from ..dna import (
+        AgentDNABlueprint,
+        create_standard_blueprint,
+    )
+except ImportError:
+    # Fall back to absolute imports (for direct path usage)
+    from identity.card import (
+        AgentIdentityCard,
+        CapabilitiesManifest,
+        Skill,
+        TrustLevel,
+        ActionType,
+    )
+    from dna.blueprint import (
+        AgentDNABlueprint,
+        create_standard_blueprint,
+    )
 
 
 # Type variable for agent result
@@ -389,7 +404,10 @@ class BaseAgent(ABC):
 
             # Compliance audit (if configured)
             if self._dna.safety.compliance:
-                from ..dna import AuditEntry
+                try:
+                    from ..dna import AuditEntry
+                except ImportError:
+                    from dna.layers import AuditEntry
                 await self._dna.safety.compliance.audit_log(AuditEntry(
                     agent_id=self.agent_id,
                     action="execute",

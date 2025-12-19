@@ -3,23 +3,42 @@
 import os
 import subprocess
 from pathlib import Path
-from typing import Optional, Any, Dict
-import numpy as np
-import whisper
-import torch
+from typing import Optional, Any, Dict, TYPE_CHECKING
 import logging
 
-# Add agent framework to path (in production, this would be an installed package)
+# Add agent framework to path
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "packages" / "agent-framework" / "src"))
+_agent_framework_path = str(Path(__file__).parent.parent.parent.parent.parent / "packages" / "agent-framework" / "src")
+if _agent_framework_path not in sys.path:
+    sys.path.insert(0, _agent_framework_path)
 
-from identity import AgentIdentityCard, Skill, TrustLevel, ActionType
-from dna import AgentDNABlueprint, create_standard_blueprint
-from base import BaseAgent, AgentResult, AgentContext
+# Import agent framework components using absolute imports
+from identity.card import AgentIdentityCard, Skill, TrustLevel, ActionType
+from dna.blueprint import AgentDNABlueprint, create_standard_blueprint
+from base.agent import BaseAgent, AgentResult, AgentContext
 
 from ..config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Lazy imports for heavy dependencies
+np = None
+whisper = None
+torch = None
+
+
+def _ensure_dependencies():
+    """Lazy load heavy dependencies."""
+    global np, whisper, torch
+    if np is None:
+        import numpy
+        np = numpy
+    if whisper is None:
+        import whisper as whisper_module
+        whisper = whisper_module
+    if torch is None:
+        import torch as torch_module
+        torch = torch_module
 
 
 def _get_ffmpeg_path():
@@ -31,8 +50,9 @@ def _get_ffmpeg_path():
         return "ffmpeg"
 
 
-def _load_audio_with_ffmpeg(file_path: str, sr: int = 16000) -> np.ndarray:
+def _load_audio_with_ffmpeg(file_path: str, sr: int = 16000):
     """Load audio using FFmpeg."""
+    _ensure_dependencies()
     ffmpeg_path = _get_ffmpeg_path()
 
     cmd = [
@@ -99,6 +119,7 @@ class TranscriptionAgent(BaseAgent):
     @property
     def whisper_model(self):
         """Lazy load Whisper model."""
+        _ensure_dependencies()
         if self._whisper_model is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
             self.logger.info(f"Loading Whisper model '{self._model_name}' on {device}")

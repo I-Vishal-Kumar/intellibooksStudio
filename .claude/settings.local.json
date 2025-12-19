@@ -19,7 +19,9 @@
       "Bash(pnpm install:*)",
       "Bash(copy:*)",
       "Bash(cp:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)"
     ]
   }
 }

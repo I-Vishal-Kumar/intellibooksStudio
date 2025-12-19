@@ -1,6 +1,6 @@
 """WebSocket message models."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Literal
 from datetime import datetime
 
@@ -17,6 +17,7 @@ class ChatMessage(BaseModel):
 
 class ChatResponse(BaseModel):
     """Outgoing chat message to client."""
+    model_config = ConfigDict(ser_json_timedelta="iso8601")
 
     type: Literal["message", "error", "system"] = "message"
     content: str
@@ -29,6 +30,7 @@ class ChatResponse(BaseModel):
 
 class SystemMessage(BaseModel):
     """System notification message."""
+    model_config = ConfigDict(ser_json_timedelta="iso8601")
 
     type: Literal["system"] = "system"
     event: str  # e.g., "user_joined", "user_left", "error"
@@ -39,6 +41,7 @@ class SystemMessage(BaseModel):
 
 class ErrorMessage(BaseModel):
     """Error message to client."""
+    model_config = ConfigDict(ser_json_timedelta="iso8601")
 
     type: Literal["error"] = "error"
     error: str

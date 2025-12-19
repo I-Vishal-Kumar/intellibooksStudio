@@ -3,6 +3,7 @@
 from pydantic_settings import BaseSettings
 from enum import Enum
 from functools import lru_cache
+from pathlib import Path
 
 
 class WhisperModel(str, Enum):
@@ -17,6 +18,21 @@ class LLMProvider(str, Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     OPENROUTER = "openrouter"
+
+
+def _find_env_file() -> str:
+    """Find .env file, checking service dir first, then project root."""
+    # Check service directory
+    service_env = Path(__file__).parent.parent / ".env"
+    if service_env.exists():
+        return str(service_env)
+
+    # Check project root (services/agents/src -> project root)
+    root_env = Path(__file__).parent.parent.parent.parent / ".env"
+    if root_env.exists():
+        return str(root_env)
+
+    return ".env"
 
 
 class Settings(BaseSettings):
@@ -53,8 +69,9 @@ class Settings(BaseSettings):
     max_audio_size_mb: int = 100
 
     class Config:
-        env_file = ".env"
+        env_file = _find_env_file()
         env_file_encoding = "utf-8"
+        extra = "ignore"  # Ignore extra fields from .env file
 
 
 @lru_cache()
