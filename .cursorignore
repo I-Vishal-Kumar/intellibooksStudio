@@ -1,3 +1,11 @@
+#cursor only ignore do not include these in gitignore
+examples
+contracts
+__pycache__
+.turbo
+.next
+
+
 # Environment variables
 *.env
 *.env.local

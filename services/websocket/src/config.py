@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 from pydantic_settings import BaseSettings
+from pydantic import ConfigDict
 from functools import lru_cache
 
 
@@ -39,12 +40,24 @@ class Settings(BaseSettings):
     # Agent Service (for future integration)
     agent_service_url: str = "http://localhost:8001"
 
+    # Deepgram for audio transcription
+    deepgram_api_key: str = ""
+
+    # Whisper.cpp paths
+    whisper_path: str = "/home/jipl/whisper.cpp/build/bin/whisper-cli"
+    whisper_model_path: str = "/home/jipl/whisper.cpp/models/ggml-small.bin"
+
+    # Hugging Face token for diarization
+    hf_token: str = ""
+
     # CORS
     cors_origins: list[str] = ["http://localhost:3001", "http://localhost:3000"]
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",  # Ignore extra fields from .env that aren't defined in this model
+    )
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

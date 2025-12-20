@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import sys
 from datetime import datetime
 from typing import Optional
 from uuid import uuid4
@@ -12,22 +13,30 @@ from ..connection_manager import manager
 
 logger = logging.getLogger(__name__)
 
-# Use simple chat agent that works without complex dependencies
+# Import ChatAgent with proper path resolution
+# Try installed package first, then fallback to direct import with sys.path manipulation
 try:
-    from .simple_chat_agent import SimpleChatAgent
-    _chat_agent = None
+    # First try: If services are installed as editable packages
+    from services.agents.src.agents.chat_agent import ChatAgent
+    logger.debug("Imported ChatAgent from installed package")
+except ImportError:
+    try:
+        # Second try: Direct import (if running from workspace root)
+        from agents.src.agents.chat_agent import ChatAgent
+        logger.debug("Imported ChatAgent via direct import")
+    except ImportError:
+        # Third try: Add project root to path and import
+        project_root = Path(__file__).parent.parent.parent.parent.parent
+        if str(project_root) not in sys.path:
+            sys.path.insert(0, str(project_root))
+        try:
+            from services.agents.src.agents.chat_agent import ChatAgent
+            logger.info(f"Imported ChatAgent by adding project root to path: {project_root}")
+        except ImportError as e:
+            logger.error(f"Failed to import ChatAgent: {e}")
+            logger.warning("ChatAgent not available. Using demo responses.")
+            ChatAgent = None
 
-    def get_chat_agent():
-        """Get or create chat agent instance."""
-        global _chat_agent
-        if _chat_agent is None:
-            _chat_agent = SimpleChatAgent()
-        return _chat_agent
-
-    logger.info("SimpleChatAgent loaded successfully")
-except ImportError as e:
-    logger.warning(f"SimpleChatAgent not available: {e}. Using demo responses.")
-    get_chat_agent = None
 
 
 async def process_chat_message(message: ChatMessage) -> ChatResponse:
@@ -47,16 +56,10 @@ async def process_chat_message(message: ChatMessage) -> ChatResponse:
     try:
         # TODO: Replace with Redis pub/sub integration
         # For now, directly import and call ChatAgent for testing
-        if get_chat_agent is None:
-            # Fallback to demo response if agent not available
+        if ChatAgent is None:
             return _get_demo_response(message)
         
-        # Get chat agent instance
-        chat_agent = get_chat_agent()
-        
-        # Initialize agent if needed
-        if not chat_agent._is_initialized:
-            await chat_agent.initialize()
+        chat_agent = ChatAgent()
         
         # Process message with chat agent
         agent_result = await chat_agent.safe_execute({

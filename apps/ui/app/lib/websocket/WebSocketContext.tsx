@@ -178,7 +178,9 @@ export function WebSocketProvider({
     if (!sessionId && !initialSessionId) {
       // Generate a new session ID
       const newSessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      setSessionId(newSessionId);
+      setTimeout(() => {
+        setSessionId(newSessionId);
+      }, 0);
     }
   }, [sessionId, initialSessionId, setSessionId]);
 

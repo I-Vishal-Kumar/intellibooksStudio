@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     default_llm_provider: LLMProvider = LLMProvider.OPENROUTER
     openrouter_model: str = "anthropic/claude-sonnet-4"
 
+    # Deepgram for audio transcription
+    deepgram_api_key: str = ""
+
     # Whisper
     whisper_model: WhisperModel = WhisperModel.BASE
 

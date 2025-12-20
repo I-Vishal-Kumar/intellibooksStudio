@@ -2,7 +2,7 @@
 name = "intellibooks-studio"
 version = "1.0.0"
 description = "Intellibooks Studio - AI-Powered Document Intelligence Platform with RAG, Agents, and MCP"
-readme = "README.md"
+readme = "readme.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [

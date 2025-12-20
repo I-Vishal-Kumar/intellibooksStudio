@@ -179,6 +179,14 @@ cd intellibooks-studio
 # Install JavaScript dependencies
 pnpm install
 
+# Setup Python services (installs all services as editable packages)
+# Linux/macOS
+./scripts/setup-python-services.sh
+
+# Windows (PowerShell)
+.\scripts\setup-python-services.ps1
+
+# Or manually:
 # Create Python virtual environment
 python -m venv .venv
 
@@ -188,8 +196,12 @@ python -m venv .venv
 # Linux/macOS
 source .venv/bin/activate
 
-# Install Python dependencies
+# Install Python services as editable packages
 pip install -e ".[dev]"
+pip install -e services/agents[dev]
+pip install -e services/websocket[dev]
+pip install -e services/rag[dev]
+pip install -e packages/agent-framework[dev]
 ```
 
 ### Step 2: Configure Environment Variables
@@ -256,15 +268,20 @@ pnpm dev:all
 Or run services individually:
 
 ```bash
-# Terminal 1 - Agent Service (Port 8001)
+# Terminal 1 - Agent Service (port from ports.json)
 pnpm dev:agents
 
-# Terminal 2 - RAG Service (Port 8002)
+# Terminal 2 - RAG Service (port from ports.json)
 pnpm dev:rag
 
-# Terminal 3 - UI (Port 3001)
+# Terminal 3 - WebSocket Service (port from ports.json)
+pnpm dev:ws
+
+# Terminal 4 - UI (port from ports.json)
 pnpm dev:ui
 ```
+
+**Note:** All service ports are centrally managed in `packages/core/ports.json`. To change a port, update `ports.json` and restart the service.
 
 ### Step 5: Access the Application
 

@@ -10,6 +10,7 @@ from .config import get_settings
 from .connection_manager import manager
 from .handlers.chat_handler import handle_chat_message
 from .models.messages import ChatResponse, SystemMessage, ErrorMessage
+from .routes import transcription, meetings
 
 # Configure logging
 logging.basicConfig(
@@ -24,8 +25,43 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown."""
+    import asyncio
+    from .utils.redis_client import get_redis_client, close_redis_client
+    from .utils.background_processor import check_abrupt_endings
+    
     logger.info(f"Starting {settings.service_name} on {settings.host}:{settings.port}")
+    
+    # Initialize Redis connection
+    if settings.redis_enabled:
+        try:
+            await get_redis_client()
+            logger.info("Redis connection established")
+        except Exception as e:
+            logger.error(f"Failed to connect to Redis: {e}")
+    
+    # Start background task for abrupt end detection
+    async def check_abrupt_ends_periodically():
+        while True:
+            try:
+                await check_abrupt_endings()
+            except Exception as e:
+                logger.error(f"Error checking abrupt endings: {e}")
+            await asyncio.sleep(30)  # Check every 30 seconds
+    
+    abrupt_end_task = asyncio.create_task(check_abrupt_ends_periodically())
+    
     yield
+    
+    # Cleanup
+    abrupt_end_task.cancel()
+    try:
+        await abrupt_end_task
+    except asyncio.CancelledError:
+        pass
+    
+    if settings.redis_enabled:
+        await close_redis_client()
+    
     logger.info(f"Shutting down {settings.service_name}")
 
 
@@ -44,6 +80,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+app.include_router(transcription.router)
+app.include_router(meetings.router)
 
 
 @app.get("/api/health")
@@ -165,8 +205,9 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str):
 if __name__ == "__main__":
     import uvicorn
     
+    # Use app directly instead of string path for better reliability
     uvicorn.run(
-        "src.main:app",
+        app,
         host=settings.host,
         port=settings.port,
         reload=settings.debug,

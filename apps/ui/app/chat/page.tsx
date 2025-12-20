@@ -3,8 +3,10 @@
 import { useState, useRef, useEffect } from "react";
 import { useUser, UserButton } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
+import { DateTime } from "luxon";
 import { useWebSocketContext } from "@/lib/websocket";
 import { useAudioRecorder } from "@/lib/useAudioRecorder";
+import { transcribeAudio } from "@/lib/api";
 import {
   Send,
   Plus,
@@ -23,8 +25,9 @@ import {
   PanelLeft,
   Square,
   X,
+  Users,
 } from "lucide-react";
-
+import { MeetingsModal } from "@/components/chat";
 interface ChatSession {
   id: string;
   title: string;
@@ -38,7 +41,6 @@ export default function ChatPage() {
   const {
     messages,
     sendMessage,
-    status,
     error: wsError,
     isConnected,
     sessionId,
@@ -47,47 +49,66 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isMeetingsModalOpen, setIsMeetingsModalOpen] = useState(false);
 
   // Audio recording
   const {
     isRecording,
     duration,
-    transcribedText,
     audioBlob,
     error: audioError,
-    speechRecognitionAvailable,
     startRecording,
     stopRecording,
     cancelRecording,
     formatDuration,
   } = useAudioRecorder({
-    onTranscriptionComplete: (text) => {
-      // Append transcribed text to input
-      setInput((prev) => (prev ? `${prev} ${text}` : text));
+    onTranscriptionComplete: async (audioBlob: Blob) => {
+      // When recording stops, automatically transcribe
+      if (audioBlob && audioBlob.size > 0) {
+        await handleTranscribeAudio(audioBlob);
+      }
     },
   });
 
   // Handle sending audio to backend for transcription
-  const handleTranscribeAudio = async () => {
-    if (!audioBlob) return;
+  const handleTranscribeAudio = async (audioBlobToTranscribe: Blob) => {
+    if (!audioBlobToTranscribe || audioBlobToTranscribe.size === 0) {
+      console.warn("No audio blob provided for transcription");
+      return;
+    }
 
-    // For now, just show a message - backend transcription can be added later
-    const message = "[Audio recorded - transcription processing...]";
-    setInput(message);
+    setIsTranscribing(true);
+    try {
+      console.log("Starting transcription, audio size:", audioBlobToTranscribe.size);
+      const transcribedText = await transcribeAudio(audioBlobToTranscribe);
+      console.log("Transcription result:", transcribedText);
+      
+      if (transcribedText) {
+        // Append transcribed text to input
+        setInput((prev) => (prev ? `${prev} ${transcribedText}` : transcribedText));
+      }
+    } catch (error) {
+      console.error("Transcription error:", error);
+      const errorMessage = error instanceof Error ? error.message : "Failed to transcribe audio";
+      setInput((prev) => (prev ? `${prev} [Transcription failed: ${errorMessage}]` : `[Transcription failed: ${errorMessage}]`));
+    } finally {
+      setIsTranscribing(false);
+    }
   };
 
-  const [chatSessions] = useState<ChatSession[]>([
+  const [chatSessions] = useState<ChatSession[]>(() => [
     {
       id: "1",
       title: "Audio Transcription Help",
       lastMessage: "How do I transcribe audio files?",
-      timestamp: new Date(Date.now() - 3600000),
+      timestamp: DateTime.now().minus({ hours: 1 }).toJSDate(),
     },
     {
       id: "2",
       title: "Translation Query",
       lastMessage: "Translate this to Spanish",
-      timestamp: new Date(Date.now() - 86400000),
+      timestamp: DateTime.now().minus({ days: 1 }).toJSDate(),
     },
   ]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -116,7 +137,9 @@ export default function ChatPage() {
   // Reset loading when messages change
   useEffect(() => {
     if (messages.length > 0) {
-      setIsLoading(false);
+      setTimeout(() => {
+        setIsLoading(false);
+      }, 100);
     }
   }, [messages]);
 
@@ -184,7 +207,7 @@ export default function ChatPage() {
                 key={session.id}
                 className="w-full flex items-start gap-3 px-3 py-2.5 rounded-lg hover:bg-gray-100 transition-colors text-left group"
               >
-                <MessageSquare className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                <MessageSquare className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">
                     {session.title}
@@ -193,9 +216,9 @@ export default function ChatPage() {
                     {session.lastMessage}
                   </p>
                 </div>
-                <button className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 rounded transition-all">
+                <span className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 rounded transition-all">
                   <MoreHorizontal className="w-4 h-4 text-gray-400" />
-                </button>
+                </span>
               </button>
             ))}
           </div>
@@ -239,13 +262,20 @@ export default function ChatPage() {
               <ChevronLeft className="w-5 h-5 text-gray-600" />
             </button>
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
+              <div className="w-8 h-8 bg-linear-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
                 <span className="text-xs font-bold text-white">IB</span>
               </div>
               <span className="font-semibold text-gray-900">Intellibooks Chat</span>
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsMeetingsModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-medium rounded-lg transition-all shadow-md hover:shadow-lg"
+            >
+              <Users className="w-4 h-4" />
+              Meetings
+            </button>
             <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
               <Share2 className="w-5 h-5 text-gray-600" />
             </button>
@@ -258,7 +288,7 @@ export default function ChatPage() {
           {messages.length === 0 ? (
             /* Welcome Screen */
             <div className="flex flex-col items-center justify-center h-full px-4">
-              <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-indigo-500/20">
+              <div className="w-16 h-16 bg-linear-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-indigo-500/20">
                 <Sparkles className="w-8 h-8 text-white" />
               </div>
               <h1 className="text-2xl font-bold text-gray-900 mb-2">
@@ -304,7 +334,7 @@ export default function ChatPage() {
                     }`}
                   >
                     {message.role === "assistant" && (
-                      <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                      <div className="w-8 h-8 bg-linear-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center shrink-0">
                         <span className="text-xs font-bold text-white">IB</span>
                       </div>
                     )}
@@ -326,7 +356,7 @@ export default function ChatPage() {
               ))}
               {isLoading && (
                 <div className="flex gap-4 mb-6">
-                  <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <div className="w-8 h-8 bg-linear-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center shrink-0">
                     <span className="text-xs font-bold text-white">IB</span>
                   </div>
                   <div className="flex items-center gap-1">
@@ -360,39 +390,42 @@ export default function ChatPage() {
                     <span className="text-sm font-medium text-red-700">
                       Recording... {formatDuration(duration)}
                     </span>
-                    {!transcribedText && duration > 2 && (
-                      <p className="text-xs text-gray-500">
-                        Audio will be sent for transcription when stopped
-                      </p>
-                    )}
+                    <p className="text-xs text-gray-500">
+                      {isTranscribing 
+                        ? "Transcribing audio..." 
+                        : "Audio will be transcribed when stopped"}
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {transcribedText && (
-                    <span className="text-xs text-green-600 max-w-xs truncate font-medium">
-                      {transcribedText}
-                    </span>
-                  )}
                   <button
                     onClick={cancelRecording}
-                    className="p-1.5 hover:bg-red-100 rounded-lg transition-colors"
+                    disabled={isTranscribing}
+                    className="p-1.5 hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
                     title="Cancel recording"
                   >
                     <X className="w-4 h-4 text-red-600" />
                   </button>
                   <button
                     onClick={async () => {
-                      const text = await stopRecording();
-                      if (text) {
-                        setInput((prev) => (prev ? `${prev} ${text}` : text));
-                      }
+                      await stopRecording();
+                      // Transcription will be triggered automatically via onTranscriptionComplete
                     }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors"
+                    disabled={isTranscribing}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-red-400 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
                   >
                     <Square className="w-3 h-3" />
-                    Stop
+                    {isTranscribing ? "Transcribing..." : "Stop"}
                   </button>
                 </div>
+              </div>
+            )}
+
+            {/* Transcription Status */}
+            {isTranscribing && !isRecording && (
+              <div className="mb-3 flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2">
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                <span className="text-sm text-blue-700">Transcribing audio...</span>
               </div>
             )}
 
@@ -454,6 +487,12 @@ export default function ChatPage() {
           </div>
         </div>
       </div>
+
+      {/* Meetings Modal */}
+      <MeetingsModal
+        isOpen={isMeetingsModalOpen}
+        onClose={() => setIsMeetingsModalOpen(false)}
+      />
     </div>
   );
 }

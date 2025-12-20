@@ -86,6 +86,35 @@ export const uploadFile = async (
   return apiClient.post(endpoint, formData, config);
 };
 
+/**
+ * Transcribe audio file using Gemini via OpenRouter
+ * @param audioBlob - Audio blob (WAV or WebM format)
+ * @returns Transcribed text
+ */
+export async function transcribeAudio(audioBlob: Blob): Promise<string> {
+  const formData = new FormData();
+  formData.append("file", audioBlob, "audio.wav");
+
+  const websocketUrl = process.env.NEXT_PUBLIC_WEBSOCKET_URL || "http://localhost:8004";
+  
+  const response = await axios.post(
+    `${websocketUrl}/api/transcription/transcribe`,
+    formData,
+    {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+      timeout: 60000, // 60 seconds for transcription
+    }
+  );
+
+  if (response.data.success && response.data.text) {
+    return response.data.text;
+  } else {
+    throw new Error(response.data.error || "Transcription failed");
+  }
+}
+
 // Export default instance
 export default apiClient;
 
