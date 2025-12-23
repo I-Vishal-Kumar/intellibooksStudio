@@ -45,7 +45,20 @@
       "Bash(curl:*)",
       "Bash(docker logs:*)",
       "Bash(.venvScriptspip.exe show ray)",
-      "Bash(\".venv\\\\Scripts\\\\pip.exe\" show ray)"
+      "Bash(\".venv\\\\Scripts\\\\pip.exe\" show ray)",
+      "Bash(git --version:*)",
+      "Bash(cmake --version:*)",
+      "Bash(ffmpeg:*)",
+      "Bash(choco:*)",
+      "Bash(refreshenv)",
+      "Bash(\"C:\\\\Program Files\\\\CMake\\\\bin\\\\cmake.exe\" --version)",
+      "Bash(\"C:\\\\Program Files\\\\CMake\\\\bin\\\\cmake.exe\" -B \"C:\\\\Users\\\\JIPL\\\\whisper.cpp\\\\build\" -S \"C:\\\\Users\\\\JIPL\\\\whisper.cpp\")",
+      "Bash(\"C:\\\\Program Files\\\\CMake\\\\bin\\\\cmake.exe\" --build \"C:\\\\Users\\\\JIPL\\\\whisper.cpp\\\\build\" --config Release)",
+      "Bash(\"C:\\\\Users\\\\JIPL\\\\whisper.cpp\\\\build\\\\bin\\\\Release\\\\whisper-cli.exe\" --help)",
+      "Bash(\"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\.venv\\\\Scripts\\\\pip.exe\" install -e \"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\services\\\\websocket[dev]\")",
+      "Bash(\"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\.venv\\\\Scripts\\\\pip.exe\" show ray)",
+      "Bash(docker exec:*)",
+      "Bash(\"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\.venv\\\\Scripts\\\\pip.exe\" install ray[client]==2.52.0)"
     ]
   }
 }
