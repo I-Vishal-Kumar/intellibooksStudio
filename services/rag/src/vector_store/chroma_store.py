@@ -208,6 +208,9 @@ class ChromaVectorStore:
                     where[key] = value
 
         # Search
+        logger.info(f"🔍 ChromaVectorStore.search: query length={len(query)}, top_k={top_k}, filters={where}")
+        logger.info(f"   Collection: {self.collection_name}, Collection count: {self.collection.count()}")
+        
         try:
             results = self.collection.query(
                 query_embeddings=[query_embedding],
@@ -216,24 +219,35 @@ class ChromaVectorStore:
                 include=["documents", "metadatas", "distances"],
             )
         except Exception as e:
-            logger.error(f"Search error: {e}")
+            logger.error(f"❌ Search error: {e}", exc_info=True)
             return []
 
         # Convert to SearchResult objects
         search_results = []
         if results["ids"] and results["ids"][0]:
+            logger.info(f"✅ ChromaDB returned {len(results['ids'][0])} results")
             for i, doc_id in enumerate(results["ids"][0]):
                 # Convert distance to similarity score (cosine distance to similarity)
                 distance = results["distances"][0][i] if results["distances"] else 0
                 score = 1 - distance  # Convert distance to similarity
+                
+                metadata = results["metadatas"][0][i] if results["metadatas"] else {}
+                content = results["documents"][0][i] if results["documents"] else ""
+                
+                logger.info(f"   [{i+1}] ID: {doc_id}, Score: {score:.4f} (distance: {distance:.4f}), Metadata: {metadata}")
+                logger.debug(f"      Content preview: {content[:100]}...")
 
                 search_results.append(SearchResult(
                     id=doc_id,
-                    content=results["documents"][0][i] if results["documents"] else "",
+                    content=content,
                     score=score,
-                    metadata=results["metadatas"][0][i] if results["metadatas"] else {},
+                    metadata=metadata,
                 ))
+        else:
+            logger.warning(f"⚠️  ChromaDB returned no results for query: '{query[:50]}...'")
+            logger.info(f"   Collection has {self.collection.count()} documents total")
 
+        logger.info(f"📊 Returning {len(search_results)} search results")
         return search_results
 
     async def delete_documents(self, ids: List[str]) -> bool:

@@ -8,11 +8,12 @@ from datetime import datetime
 class ChatMessage(BaseModel):
     """Incoming chat message from client."""
 
-    type: Literal["message"] = "message"
+    type: Literal["message", "research"] = "message"
     content: str = Field(..., min_length=1, max_length=10000)
     session_id: str
     user_id: Optional[str] = None
     metadata: Optional[dict] = None
+    research_params: Optional[dict] = None
 
 
 class ChatResponse(BaseModel):

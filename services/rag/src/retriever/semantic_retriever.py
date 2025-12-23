@@ -52,6 +52,8 @@ class SemanticRetriever:
         k = top_k or self.default_top_k
         threshold = min_score or self.min_score_threshold
 
+        logger.info(f"🔍 SemanticRetriever.retrieve: query='{query}', top_k={k}, threshold={threshold}, filters={filters}")
+
         # Search vector store
         results = await self.vector_store.search(
             query=query,
@@ -59,8 +61,21 @@ class SemanticRetriever:
             filters=filters,
         )
 
+        logger.info(f"📊 Vector store search returned {len(results)} results (before filtering)")
+
         # Filter by score threshold
         filtered_results = [r for r in results if r.score >= threshold][:k]
+
+        logger.info(f"✅ After filtering (threshold={threshold}): {len(filtered_results)} chunks")
+        
+        if filtered_results:
+            logger.info("📋 Retrieved chunks:")
+            for i, result in enumerate(filtered_results, 1):
+                logger.info(f"   [{i}] ID: {result.id}, Score: {result.score:.4f}, Metadata: {result.metadata}")
+        else:
+            logger.warning(f"⚠️  No chunks passed the score threshold ({threshold})")
+            if results:
+                logger.info(f"   Top result score: {results[0].score:.4f} (below threshold)")
 
         return RetrievalResult(
             chunks=filtered_results,

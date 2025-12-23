@@ -1,20 +1,8 @@
 import { FC, useState, useRef, useEffect } from "react";
-import {
-    SlidersHorizontal,
-    MoreVertical,
-    PlusSquare,
-    Copy,
-    ThumbsUp,
-    ThumbsDown,
-    ArrowUpRight,
-    Upload,
-    Loader2,
-    Clock,
-    BookOpen,
-    Search,
-    FileText,
-    Sparkles
-} from "lucide-react";
+import { useWebSocketContext } from "@/lib/websocket";
+import { useAudioRecorder } from "@/lib/useAudioRecorder";
+import { transcribeAudio } from "@/lib/api";
+import { ChatHeader, EmptyState, MessageList, MessageInput } from "./chat";
 
 interface Message {
     id: string;
@@ -27,6 +15,7 @@ interface Message {
         score: number;
         metadata: Record<string, unknown>;
     }>;
+    metadata?: Record<string, unknown>;
 }
 
 interface RAGStats {
@@ -42,275 +31,234 @@ interface ChatPanelProps {
     onSendMessage?: (message: string) => void;
     isQuerying?: boolean;
     stats?: RAGStats | null;
+    useWebSocket?: boolean;
+    sessionId?: string;
 }
 
-const ChatPanel: FC<ChatPanelProps> = ({
+type ChatMode = "chat" | "research";
+
+// Internal component that uses WebSocket context
+const ChatPanelInternal: FC<ChatPanelProps & { wsContext?: ReturnType<typeof useWebSocketContext> | null }> = ({
     hasSources,
-    onUploadClick,
     isUploading,
-    messages = [],
+    messages: externalMessages = [],
     onSendMessage,
-    isQuerying = false,
-    stats
+    isQuerying: externalIsQuerying = false,
+    stats,
+    useWebSocket = true,
+    wsContext = null,
 }) => {
     const [input, setInput] = useState("");
+    const [chatMode, setChatMode] = useState<ChatMode>("chat");
+    const [isTranscribing, setIsTranscribing] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
-    const inputRef = useRef<HTMLInputElement>(null);
+    const inputRef = useRef<HTMLTextAreaElement>(null);
+
+    // Only use WebSocket if explicitly enabled and context is available
+    const shouldUseWebSocket = useWebSocket && wsContext !== null;
+    const wsMessages = shouldUseWebSocket && wsContext ? wsContext.messages : [];
+    const wsIsConnected = shouldUseWebSocket && wsContext ? wsContext.isConnected : false;
+    const wsIsQuerying =
+        shouldUseWebSocket && wsContext
+            ? wsContext.status === "connecting" ||
+              (wsMessages.length > 0 &&
+                  wsMessages[wsMessages.length - 1]?.role === "user" &&
+                  !wsMessages.some(
+                      (m, i) =>
+                          i >
+                              wsMessages.findIndex(
+                                  (msg) => msg.id === wsMessages[wsMessages.length - 1]?.id
+                              ) &&
+                          m.role === "assistant"
+                  ))
+            : false;
+
+    // Use WebSocket messages if available, otherwise fall back to external messages
+    // Filter out system messages and ensure role is user or assistant
+    const messages: Message[] = shouldUseWebSocket && wsContext
+        ? wsMessages
+              .filter((msg) => msg.role === "user" || msg.role === "assistant")
+              .map((msg) => ({
+                  id: msg.id,
+                  role: msg.role as "user" | "assistant",
+                  content: msg.content,
+                  timestamp: msg.timestamp,
+                  sources: Array.isArray(msg.metadata?.sources)
+                      ? (msg.metadata!.sources as Array<{
+                            id: string;
+                            content_preview: string;
+                            score: number;
+                            metadata: Record<string, unknown>;
+                        }>)
+                      : [],
+                  metadata: msg.metadata || {},
+              }))
+        : externalMessages;
+
+    const isQuerying = shouldUseWebSocket && wsContext ? wsIsQuerying : externalIsQuerying;
+
+    // Audio recording
+    const {
+        isRecording,
+        duration,
+        error: audioError,
+        startRecording,
+        stopRecording,
+        cancelRecording,
+        formatDuration,
+    } = useAudioRecorder({
+        onTranscriptionComplete: async (audioBlob: Blob) => {
+            if (audioBlob && audioBlob.size > 0) {
+                await handleTranscribeAudio(audioBlob);
+            }
+        },
+    });
+
+    // Handle sending audio to backend for transcription
+    const handleTranscribeAudio = async (audioBlobToTranscribe: Blob) => {
+        if (!audioBlobToTranscribe || audioBlobToTranscribe.size === 0) {
+            console.warn("No audio blob provided for transcription");
+            return;
+        }
+
+        setIsTranscribing(true);
+        try {
+            const transcribedText = await transcribeAudio(audioBlobToTranscribe);
+            if (transcribedText) {
+                setInput((prev) => (prev ? `${prev} ${transcribedText}` : transcribedText));
+            }
+        } catch (error) {
+            console.error("Transcription error:", error);
+            const errorMessage =
+                error instanceof Error ? error.message : "Failed to transcribe audio";
+            setInput(
+                (prev) =>
+                    prev
+                        ? `${prev} [Transcription failed: ${errorMessage}]`
+                        : `[Transcription failed: ${errorMessage}]`
+            );
+        } finally {
+            setIsTranscribing(false);
+        }
+    };
 
     // Scroll to bottom on new messages
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
-    const handleSend = () => {
-        if (!input.trim() || isQuerying || !hasSources) return;
-        onSendMessage?.(input.trim());
-        setInput("");
-    };
+    // Auto-resize textarea
+    useEffect(() => {
+        if (inputRef.current) {
+            inputRef.current.style.height = "auto";
+            inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 200)}px`;
+        }
+    }, [input]);
 
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            handleSend();
+    const handleSend = () => {
+        if (!input.trim() || isQuerying) return;
+
+        const trimmedInput = input.trim();
+        setInput("");
+
+        if (shouldUseWebSocket && wsContext) {
+            const sessionId = wsContext.sessionId || undefined;
+            if (chatMode === "research") {
+                if (sessionId) {
+                    wsContext.sendResearchMessage(trimmedInput, sessionId, {
+                        top_k: 5,
+                        use_rag: true,
+                    });
+                }
+            } else {
+                if (sessionId) {
+                    wsContext.sendMessage(trimmedInput, sessionId);
+                }
+            }
+        } else if (onSendMessage) {
+            onSendMessage(trimmedInput);
         }
     };
 
-    const suggestedQueries = [
-        { icon: <Search className="w-5 h-5" />, text: "What are the main topics in my documents?" },
-        { icon: <BookOpen className="w-5 h-5" />, text: "Summarize the key points" },
-        { icon: <FileText className="w-5 h-5" />, text: "Find information about..." },
-        { icon: <Sparkles className="w-5 h-5" />, text: "What insights can you provide?" },
-    ];
+    const handleQueryClick = (query: string) => {
+        setInput(query);
+        inputRef.current?.focus();
+    };
+
+    const showEmptyState = messages.length === 0;
 
     return (
         <div className="flex-1 bg-white border border-gray-200 rounded-2xl flex flex-col transition-all duration-300 shadow-sm overflow-hidden">
-            {/* Chat Header */}
-            <div className="flex items-center justify-between p-4 border-b border-gray-100 shrink-0">
-                <div className="flex items-center gap-3">
-                    <span className="font-semibold text-gray-700">Chat</span>
-                    {stats && (
-                        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
-                            {stats.total_chunks} chunks indexed
-                        </span>
-                    )}
-                </div>
-                <div className="flex items-center gap-2">
-                    <button className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors">
-                        <SlidersHorizontal size={18} />
-                    </button>
-                    <button className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors">
-                        <MoreVertical size={18} />
-                    </button>
-                </div>
-            </div>
+            <ChatHeader
+                stats={stats}
+                chatMode={chatMode}
+                onModeChange={setChatMode}
+                isConnected={wsIsConnected}
+                showModeToggle={shouldUseWebSocket && wsContext !== null}
+            />
 
             {/* Chat Content */}
             <div className="flex-1 overflow-y-auto min-h-0">
-                {isUploading ? (
-                    // Uploading state
-                    <div className="h-full flex flex-col items-center justify-center p-8 text-center space-y-6 animate-pulse">
-                        <div className="w-24 h-32 bg-amber-50 rounded-lg border-2 border-amber-200 flex flex-col items-center justify-center shadow-sm relative overflow-hidden">
-                            <div className="absolute left-0 top-0 bottom-0 w-2 bg-amber-200"></div>
-                            <div className="w-12 h-16 bg-white rounded flex flex-col p-1 gap-1">
-                                <div className="h-1 bg-gray-100 rounded w-full"></div>
-                                <div className="h-1 bg-gray-100 rounded w-2/3"></div>
-                            </div>
-                        </div>
-                        <div className="space-y-1">
-                            <h3 className="text-2xl font-semibold text-gray-900">Processing document...</h3>
-                            <p className="text-sm text-gray-500 font-medium">Extracting and indexing content</p>
-                        </div>
-                    </div>
-                ) : !hasSources ? (
-                    // No sources state - Simple prompt to use sidebar
-                    <div className="h-full flex flex-col items-center justify-center p-8 text-center space-y-4">
-                        <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center">
-                            <Search size={24} className="text-gray-400" />
-                        </div>
-                        <div className="space-y-2">
-                            <h3 className="text-lg font-medium text-gray-700">Start a conversation</h3>
-                            <p className="text-sm text-gray-400 max-w-sm">
-                                Upload documents using the sidebar to begin querying your knowledge base.
-                            </p>
-                        </div>
-                    </div>
-                ) : messages.length === 0 ? (
-                    // Has sources but no messages - Show suggested queries
-                    <div className="h-full flex flex-col items-center justify-center p-8 text-center">
-                        <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-purple-500/20">
-                            <BookOpen size={32} className="text-white" />
-                        </div>
-                        <h3 className="text-xl font-semibold text-gray-900 mb-2">Ready to answer your questions</h3>
-                        <p className="text-gray-500 mb-6 max-w-md">
-                            Your documents are indexed. Ask anything about the content.
-                        </p>
-
-                        {/* Suggested Queries */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl">
-                            {suggestedQueries.map((query, index) => (
-                                <button
-                                    key={index}
-                                    onClick={() => {
-                                        setInput(query.text);
-                                        inputRef.current?.focus();
-                                    }}
-                                    className="flex items-center gap-3 p-4 bg-gray-50 hover:bg-gray-100 rounded-xl border border-gray-200 transition-colors text-left"
-                                >
-                                    <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center text-purple-600 border border-gray-200">
-                                        {query.icon}
-                                    </div>
-                                    <span className="text-sm font-medium text-gray-700">
-                                        {query.text}
-                                    </span>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+                {showEmptyState ? (
+                    <EmptyState
+                        hasSources={hasSources}
+                        isUploading={isUploading || false}
+                        chatMode={chatMode}
+                        onQueryClick={handleQueryClick}
+                    />
                 ) : (
-                    // Messages list
-                    <div className="p-6 space-y-6">
-                        {messages.map((message) => (
-                            <div
-                                key={message.id}
-                                className={`${
-                                    message.role === "user" ? "flex justify-end" : ""
-                                }`}
-                            >
-                                <div
-                                    className={`${
-                                        message.role === "user"
-                                            ? "bg-purple-600 text-white rounded-2xl rounded-br-md px-4 py-3 max-w-[80%]"
-                                            : "flex gap-4"
-                                    }`}
-                                >
-                                    {message.role === "assistant" && (
-                                        <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                                            <BookOpen className="w-4 h-4 text-white" />
-                                        </div>
-                                    )}
-                                    <div className={message.role === "user" ? "" : "flex-1"}>
-                                        <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                                            {message.content}
-                                        </p>
-
-                                        {/* Sources */}
-                                        {message.sources && message.sources.length > 0 && (
-                                            <div className="mt-3 pt-3 border-t border-gray-200">
-                                                <p className="text-xs font-medium text-gray-500 mb-2">
-                                                    Sources ({message.sources.length})
-                                                </p>
-                                                <div className="space-y-2">
-                                                    {message.sources.slice(0, 3).map((source, i) => (
-                                                        <div
-                                                            key={i}
-                                                            className="p-2 bg-gray-50 rounded-lg border border-gray-100"
-                                                        >
-                                                            <p className="text-xs text-gray-600 line-clamp-2">
-                                                                {source.content_preview}
-                                                            </p>
-                                                            <p className="text-xs text-gray-400 mt-1">
-                                                                Relevance: {(source.score * 100).toFixed(0)}%
-                                                            </p>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        {/* Action buttons for assistant messages */}
-                                        {message.role === "assistant" && (
-                                            <div className="flex items-center gap-4 pt-3 mt-3 border-t border-gray-100">
-                                                <button className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors shadow-sm bg-white">
-                                                    <PlusSquare size={14} />
-                                                    Save to note
-                                                </button>
-                                                <button className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors">
-                                                    <Copy size={14} />
-                                                </button>
-                                                <button className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors">
-                                                    <ThumbsUp size={14} />
-                                                </button>
-                                                <button className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors">
-                                                    <ThumbsDown size={14} />
-                                                </button>
-                                                <div className="flex items-center gap-1 ml-auto text-xs text-gray-400">
-                                                    <Clock className="w-3 h-3" />
-                                                    <span>
-                                                        {new Date(message.timestamp).toLocaleTimeString()}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
-
-                        {/* Loading indicator */}
-                        {isQuerying && (
-                            <div className="flex gap-4">
-                                <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                                    <BookOpen className="w-4 h-4 text-white" />
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <Loader2 className="w-4 h-4 text-purple-500 animate-spin" />
-                                    <span className="text-sm text-gray-500">
-                                        Searching knowledge base...
-                                    </span>
-                                </div>
-                            </div>
-                        )}
-
-                        <div ref={messagesEndRef} />
-                    </div>
+                    <MessageList
+                        messages={messages}
+                        isQuerying={isQuerying}
+                        chatMode={chatMode}
+                        messagesEndRef={messagesEndRef}
+                    />
                 )}
             </div>
 
-            {/* Input Area */}
-            <div className="p-4 bg-white shrink-0 border-t border-gray-100">
-                <div className="relative group">
-                    <input
-                        ref={inputRef}
-                        type="text"
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        placeholder={
-                            !hasSources
-                                ? "Upload a source to get started"
-                                : isUploading
-                                    ? "Processing documents..."
-                                    : "Ask a question about your documents..."
-                        }
-                        className="w-full bg-[#f8fafc] border border-gray-200 rounded-2xl py-3 pl-4 pr-32 text-sm outline-none transition-all focus:bg-white focus:ring-4 focus:ring-purple-500/10 focus:border-purple-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                        disabled={!hasSources || isUploading}
-                    />
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-3">
-                        <span className="text-[11px] text-gray-400 bg-white border border-gray-100 px-2 py-0.5 rounded-full shadow-sm">
-                            {stats?.total_chunks || 0} chunks
-                        </span>
-                        <button
-                            onClick={handleSend}
-                            disabled={!input.trim() || isQuerying || !hasSources}
-                            className="w-8 h-8 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-full flex items-center justify-center transition-colors"
-                        >
-                            {isQuerying ? (
-                                <Loader2 size={16} className="animate-spin" />
-                            ) : (
-                                <ArrowUpRight size={18} />
-                            )}
-                        </button>
-                    </div>
-                </div>
-                <p className="text-[10px] text-gray-400 text-center mt-2 font-medium">
-                    {!hasSources
-                        ? "Upload documents to enable querying"
-                        : "Answers are generated based on your uploaded documents"
-                    }
-                </p>
-            </div>
+            <MessageInput
+                input={input}
+                setInput={setInput}
+                onSend={handleSend}
+                inputRef={inputRef}
+                chatMode={chatMode}
+                hasSources={hasSources}
+                isUploading={isUploading || false}
+                isQuerying={isQuerying}
+                isConnected={shouldUseWebSocket ? wsIsConnected : true}
+                stats={stats}
+                isRecording={isRecording}
+                duration={duration}
+                isTranscribing={isTranscribing}
+                audioError={audioError}
+                startRecording={startRecording}
+                stopRecording={stopRecording}
+                cancelRecording={cancelRecording}
+                formatDuration={formatDuration}
+                onTranscribeAudio={handleTranscribeAudio}
+            />
         </div>
     );
+};
+
+// Main component - always call hook (React requirement)
+const ChatPanel: FC<ChatPanelProps> = (props) => {
+    const { useWebSocket = true } = props;
+
+    // Always call the hook unconditionally (required by React rules)
+    // If WebSocketProvider is not available, this will throw
+    // The parent should wrap with WebSocketProvider or set useWebSocket=false
+    let wsContext: ReturnType<typeof useWebSocketContext> | null = null;
+
+    // Always call hook - if provider missing, it will throw
+    wsContext = useWebSocketContext();
+
+    // Only use WebSocket if explicitly enabled
+    if (!useWebSocket) {
+        wsContext = null;
+    }
+
+    return <ChatPanelInternal {...props} wsContext={wsContext} />;
 };
 
 export default ChatPanel;

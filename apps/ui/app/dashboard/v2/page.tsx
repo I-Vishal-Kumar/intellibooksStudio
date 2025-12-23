@@ -19,6 +19,7 @@ import AudioView from "@/components/dashboard_v2/AudioView";
 import VideoView from "@/components/dashboard_v2/VideoView";
 import InfographicView from "@/components/dashboard_v2/InfographicView";
 import SlideDeckView from "@/components/dashboard_v2/SlideDeckView";
+import { WebSocketProvider } from "@/lib/websocket";
 import dummyData from "../../../dummy_data/dummy_data.json";
 
 // RAG API Configuration
@@ -60,7 +61,7 @@ interface RAGStats {
 }
 
 export default function DashboardV2() {
-    const { isSignedIn, isLoaded, user } = useUser();
+    const { isSignedIn, isLoaded } = useUser();
     const router = useRouter();
 
     // Panel state
@@ -461,15 +462,18 @@ export default function DashboardV2() {
                 {/* Chat Section */}
                 <div className="flex-1 flex flex-col min-w-0">
                     <div className="flex-1 bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
-                        <ChatPanel
-                            hasSources={hasSources}
-                            onUploadClick={() => setShowUploadModal(true)}
-                            isUploading={isUploading}
-                            messages={messages}
-                            onSendMessage={handleQuery}
-                            isQuerying={isQuerying}
-                            stats={stats}
-                        />
+                        <WebSocketProvider>
+                            <ChatPanel
+                                hasSources={hasSources}
+                                onUploadClick={() => setShowUploadModal(true)}
+                                isUploading={isUploading}
+                                messages={messages}
+                                onSendMessage={handleQuery}
+                                isQuerying={isQuerying}
+                                stats={stats}
+                                useWebSocket={true}
+                            />
+                        </WebSocketProvider>
                     </div>
                 </div>
 

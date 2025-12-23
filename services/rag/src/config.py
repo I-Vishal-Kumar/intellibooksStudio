@@ -1,11 +1,18 @@
 """Configuration for RAG Service."""
 
 from pydantic_settings import BaseSettings
+from pydantic import ConfigDict
 from functools import lru_cache
 
 
 class Settings(BaseSettings):
     """RAG Service configuration."""
+
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",  # Ignore extra fields from other services' .env entries
+    )
 
     # Service
     service_name: str = "rag-service"
@@ -39,10 +46,6 @@ class Settings(BaseSettings):
     chunk_size: int = 1000
     chunk_overlap: int = 200
     top_k_results: int = 5
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
 
 
 @lru_cache()

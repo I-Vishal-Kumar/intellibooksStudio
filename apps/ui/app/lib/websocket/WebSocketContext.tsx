@@ -9,6 +9,7 @@ interface WebSocketContextValue {
   status: WebSocketStatus;
   error: string | null;
   sendMessage: (content: string, sessionId: string) => boolean;
+  sendResearchMessage: (content: string, sessionId: string, researchParams?: { top_k?: number; filters?: Record<string, unknown>; use_rag?: boolean }) => boolean;
   messages: Message[];
   isConnected: boolean;
   sessionId: string | null;
@@ -86,8 +87,8 @@ export function WebSocketProvider({
       return;
     }
 
-    // Handle regular chat messages
-    if (wsMessage.type === "message" && wsMessage.content) {
+    // Handle regular chat messages and research messages
+    if ((wsMessage.type === "message" || wsMessage.type === "research") && wsMessage.content) {
       setMessages((prev) => {
         // Check if message already exists to prevent duplicates
         const messageId = wsMessage.message_id || `msg-${Date.now()}`;
@@ -101,7 +102,10 @@ export function WebSocketProvider({
             : "assistant",
           content: wsMessage.content || "",
           timestamp: wsMessage.timestamp ? new Date(wsMessage.timestamp) : new Date(),
-          metadata: wsMessage.metadata,
+          metadata: {
+            ...wsMessage.metadata,
+            messageType: wsMessage.type, // Track if it's a research or regular message
+          },
         };
         return [...prev, message];
       });
@@ -161,6 +165,45 @@ export function WebSocketProvider({
     [sessionId, wsSendMessage]
   );
 
+  const sendResearchMessage = useCallback(
+    (content: string, targetSessionId?: string, researchParams?: { top_k?: number; filters?: Record<string, unknown>; use_rag?: boolean }) => {
+      const targetId = targetSessionId || sessionId;
+      if (!targetId) {
+        console.error("No session ID available");
+        return false;
+      }
+
+      // Check if message was already sent (prevent duplicates)
+      const messageId = `research-${Date.now()}-${Math.random()}`;
+      const userMessage: Message = {
+        id: messageId,
+        role: "user",
+        content,
+        timestamp: new Date(),
+        metadata: { messageType: "research" },
+      };
+
+      // Add user message to local state immediately
+      setMessages((prev) => {
+        // Prevent duplicate messages
+        const exists = prev.some((msg) => msg.id === messageId || (msg.content === content && msg.role === "user" && Date.now() - msg.timestamp.getTime() < 1000));
+        if (exists) return prev;
+        return [...prev, userMessage];
+      });
+
+      // Send via WebSocket
+      const success = wsSendMessage({
+        type: "research",
+        content,
+        session_id: targetId,
+        research_params: researchParams,
+      });
+
+      return success;
+    },
+    [sessionId, wsSendMessage]
+  );
+
   const setSessionId = useCallback(
     (id: string | null) => {
       setSessionIdState(id);
@@ -188,6 +231,7 @@ export function WebSocketProvider({
     status,
     error,
     sendMessage,
+    sendResearchMessage,
     messages,
     isConnected: status === "connected",
     sessionId,

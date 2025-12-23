@@ -33,10 +33,12 @@ logger = logging.getLogger(__name__)
 @dataclass
 class RAGConfig:
     """Configuration for RAG pipeline."""
-    # ChromaDB Docker settings
+    # ChromaDB settings
     chroma_host: str = "localhost"
     chroma_port: int = 8000
     chroma_collection: str = "intellibooks_knowledge"
+    chroma_use_http: bool = True  # Use HTTP client (Docker) or persistent client (local)
+    chroma_persist_directory: str = None  # Directory for persistent client (auto-set if None)
 
     # Embedding settings
     embedding_model: str = "all-MiniLM-L6-v2"
@@ -76,10 +78,17 @@ def load_config() -> RAGConfig:
     if env_path.exists():
         load_dotenv(env_path)
 
+    # Determine persist directory
+    persist_dir = os.getenv("CHROMA_PERSIST_DIRECTORY")
+    if not persist_dir:
+        persist_dir = str(Path(__file__).parent.parent.parent.parent / "data" / "chroma_db")
+    
     return RAGConfig(
         chroma_host=os.getenv("CHROMA_HOST", "localhost"),
         chroma_port=int(os.getenv("CHROMA_PORT", "8000")),
         chroma_collection=os.getenv("CHROMA_COLLECTION", "intellibooks_knowledge"),
+        chroma_use_http=os.getenv("CHROMA_USE_HTTP", "true").lower() == "true",
+        chroma_persist_directory=persist_dir,
         embedding_model=os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
         chunk_size=int(os.getenv("RAG_CHUNK_SIZE", "1000")),
         chunk_overlap=int(os.getenv("RAG_CHUNK_OVERLAP", "200")),
@@ -320,40 +329,179 @@ class ChromaDBHttpClient:
         return result if isinstance(result, int) else 0
 
 
+class ChromaDBPersistentClient:
+    """ChromaDB persistent client wrapper for local Python package."""
+    
+    def __init__(self, persist_directory: str, collection_name: str):
+        try:
+            import chromadb
+            self.chromadb = chromadb
+        except ImportError:
+            raise ImportError("ChromaDB package not installed. Install with: pip install chromadb")
+        
+        self.persist_directory = persist_directory
+        self.collection_name = collection_name
+        self._client = None
+        self._collection = None
+        self._collection_ids = {collection_name: collection_name}  # For compatibility
+        
+        # Ensure directory exists
+        Path(persist_directory).mkdir(parents=True, exist_ok=True)
+        
+    @property
+    def client(self):
+        """Get or create persistent client."""
+        if self._client is None:
+            self._client = self.chromadb.PersistentClient(path=self.persist_directory)
+        return self._client
+    
+    @property
+    def collection(self):
+        """Get or create collection."""
+        if self._collection is None:
+            self._collection = self.client.get_or_create_collection(
+                name=self.collection_name,
+                metadata={"hnsw:space": "cosine"},
+            )
+        return self._collection
+    
+    def heartbeat(self) -> int:
+        """Heartbeat check (always succeeds for persistent client)."""
+        return 1
+    
+    def get_or_create_collection(self, name: str, metadata: dict = None) -> str:
+        """Get or create collection (for compatibility with HTTP client interface)."""
+        if name != self.collection_name:
+            # Create a new collection if different name requested
+            collection = self.client.get_or_create_collection(
+                name=name,
+                metadata=metadata or {"hnsw:space": "cosine"},
+            )
+            self._collection_ids[name] = name
+            return name
+        # Ensure our main collection exists
+        _ = self.collection
+        return name
+    
+    def upsert(self, collection_name: str, ids: list, embeddings: list,
+               documents: list, metadatas: list):
+        """Upsert documents."""
+        if collection_name != self.collection_name:
+            # Get the requested collection
+            collection = self.client.get_or_create_collection(name=collection_name)
+        else:
+            collection = self.collection
+        
+        collection.upsert(
+            ids=ids,
+            embeddings=embeddings,
+            documents=documents,
+            metadatas=metadatas,
+        )
+    
+    def query(self, collection_name: str, query_embeddings: list, n_results: int = 5,
+              where: dict = None, include: list = None) -> dict:
+        """Query collection."""
+        if collection_name != self.collection_name:
+            collection = self.client.get_collection(name=collection_name)
+        else:
+            collection = self.collection
+        
+        result = collection.query(
+            query_embeddings=query_embeddings,
+            n_results=n_results,
+            where=where,
+            include=include or ["documents", "metadatas", "distances"],
+        )
+        return result
+    
+    def delete(self, collection_name: str, where: dict):
+        """Delete documents."""
+        if collection_name != self.collection_name:
+            collection = self.client.get_collection(name=collection_name)
+        else:
+            collection = self.collection
+        
+        collection.delete(where=where)
+    
+    def delete_collection(self, collection_name: str):
+        """Delete collection."""
+        self.client.delete_collection(name=collection_name)
+        if collection_name == self.collection_name:
+            self._collection = None
+        self._collection_ids.pop(collection_name, None)
+    
+    def count(self, collection_name: str) -> int:
+        """Count documents."""
+        if collection_name != self.collection_name:
+            collection = self.client.get_collection(name=collection_name)
+        else:
+            collection = self.collection
+        return collection.count()
+
+
 class ChromaDBStore:
-    """Vector store using ChromaDB Docker instance via HTTP."""
+    """Vector store using ChromaDB - supports both HTTP (Docker) and persistent (local) clients."""
 
     def __init__(self, config: RAGConfig):
         self.config = config
         self._client = None
         self._collection_id = None
         self._embedding_service = EmbeddingService(config.embedding_model)
+        self._use_persistent = False
 
     @property
-    def client(self) -> ChromaDBHttpClient:
-        """Lazy load ChromaDB HTTP client."""
+    def client(self):
+        """Lazy load ChromaDB client - tries HTTP first, falls back to persistent."""
         if self._client is None:
-            self._client = ChromaDBHttpClient(
-                host=self.config.chroma_host,
-                port=self.config.chroma_port,
-            )
-            # Verify connection
-            try:
-                self._client.heartbeat()
-                logger.info(f"Connected to ChromaDB at {self.config.chroma_host}:{self.config.chroma_port}")
-            except Exception as e:
-                logger.error(f"Failed to connect to ChromaDB: {e}")
-                raise
+            # Try HTTP client first if configured
+            http_success = False
+            if self.config.chroma_use_http:
+                try:
+                    http_client = ChromaDBHttpClient(
+                        host=self.config.chroma_host,
+                        port=self.config.chroma_port,
+                    )
+                    # Verify connection - this will raise if ChromaDB server is not available
+                    http_client.heartbeat()
+                    self._client = http_client
+                    self._use_persistent = False
+                    http_success = True
+                    logger.info(f"Connected to ChromaDB HTTP server at {self.config.chroma_host}:{self.config.chroma_port}")
+                except Exception as e:
+                    logger.warning(f"Failed to connect to ChromaDB HTTP server: {e}")
+                    logger.info("Falling back to persistent ChromaDB client...")
+            
+            # Use persistent client if HTTP failed or not configured
+            if not http_success:
+                try:
+                    self._client = ChromaDBPersistentClient(
+                        persist_directory=self.config.chroma_persist_directory,
+                        collection_name=self.config.chroma_collection,
+                    )
+                    self._use_persistent = True
+                    logger.info(f"Using ChromaDB persistent client at {self.config.chroma_persist_directory}")
+                except Exception as e:
+                    logger.error(f"Failed to initialize ChromaDB persistent client: {e}")
+                    raise
         return self._client
 
     @property
     def collection_name(self) -> str:
         """Get collection name and ensure it exists."""
+        # Ensure client is initialized first
+        _ = self.client
+        
         if self._collection_id is None:
-            self._collection_id = self.client.get_or_create_collection(
-                name=self.config.chroma_collection,
-                metadata={"hnsw:space": "cosine"},
-            )
+            if self._use_persistent:
+                # Persistent client handles collection creation automatically
+                _ = self.client.collection  # Access to trigger creation
+            else:
+                # HTTP client needs explicit collection creation
+                self._collection_id = self.client.get_or_create_collection(
+                    name=self.config.chroma_collection,
+                    metadata={"hnsw:space": "cosine"},
+                )
             logger.info(f"Using collection: {self.config.chroma_collection}")
         return self.config.chroma_collection
 

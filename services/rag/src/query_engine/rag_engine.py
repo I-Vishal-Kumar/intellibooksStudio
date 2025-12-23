@@ -94,6 +94,8 @@ Answer:"""),
         Returns:
             RAGResponse with answer and sources
         """
+        logger.info(f"🔍 RAG Query: '{question}', top_k: {top_k}, filters: {filters}")
+        
         # Retrieve relevant chunks
         retrieval_result = await self.retriever.retrieve(
             query=question,
@@ -101,7 +103,10 @@ Answer:"""),
             filters=filters,
         )
 
+        logger.info(f"📊 Retrieval result: {len(retrieval_result.chunks)} chunks found")
+        
         if not retrieval_result.chunks:
+            logger.warning(f"⚠️  No chunks retrieved for query: '{question}'")
             return RAGResponse(
                 answer="I couldn't find any relevant information in the transcripts to answer your question.",
                 sources=[],
@@ -113,22 +118,36 @@ Answer:"""),
         # Build context from retrieved chunks
         context_parts = []
         sources = []
-        for chunk in retrieval_result.chunks:
-            context_parts.append(f"[Transcript {chunk.metadata.get('transcript_id', 'unknown')}]\n{chunk.content}")
+        logger.info("📋 Processing retrieved chunks:")
+        for i, chunk in enumerate(retrieval_result.chunks, 1):
+            transcript_id = chunk.metadata.get('transcript_id', 'unknown')
+            score = chunk.score
+            content_preview = chunk.content[:150] + "..." if len(chunk.content) > 150 else chunk.content
+            logger.info(f"   [{i}] Chunk ID: {chunk.id}, Transcript: {transcript_id}, Score: {score:.4f}")
+            logger.debug(f"      Preview: {content_preview}")
+            
+            context_parts.append(f"[Transcript {transcript_id}]\n{chunk.content}")
             sources.append({
-                "transcript_id": chunk.metadata.get("transcript_id"),
+                "transcript_id": transcript_id,
                 "chunk_id": chunk.id,
-                "score": chunk.score,
+                "score": score,
                 "preview": chunk.content[:200] + "..." if len(chunk.content) > 200 else chunk.content,
+                "metadata": chunk.metadata,
             })
 
         context = "\n\n---\n\n".join(context_parts)
+        
+        # Calculate average confidence from chunk scores
+        avg_confidence = sum(chunk.score for chunk in retrieval_result.chunks) / len(retrieval_result.chunks)
+        logger.info(f"📈 Average confidence score: {avg_confidence:.4f}")
 
         # Generate answer
+        logger.info("🤖 Generating answer with LLM...")
         answer = await self.chain.ainvoke({
             "context": context,
             "question": question,
         })
+        logger.info(f"✅ Answer generated (length: {len(answer)} chars)")
 
         # Calculate confidence based on retrieval scores
         avg_score = sum(c.score for c in retrieval_result.chunks) / len(retrieval_result.chunks)

@@ -1,14 +1,14 @@
 [project]
 name = "intellibooks-agent-service"
 version = "1.0.0"
-description = "Agent Service for Intellibooks Studio - Transcription, Translation, Summarization, Intent Detection, and Keyword Extraction"
+description = "Agent Service for Intellibooks Studio - Transcription, Translation, Summarization, Intent Detection, Keyword Extraction, and Research with Deep Agents"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
     { name = "Intellibooks Team" }
 ]
-keywords = ["agents", "transcription", "whisper", "langchain", "langgraph", "nlp", "ai"]
+keywords = ["agents", "transcription", "whisper", "langchain", "langgraph", "deepagents", "nlp", "ai", "rag"]
 
 dependencies = [
     # Web framework
@@ -23,6 +23,7 @@ dependencies = [
     "langchain-anthropic>=0.2.0",
     "langchain-community>=0.3.0",
     "langgraph>=0.2.0",
+    "deepagents>=0.1.0",
     
     # OpenAI client for direct API access (needed for audio transcription)
     "openai>=1.0.0",
