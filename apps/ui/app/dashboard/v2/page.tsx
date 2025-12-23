@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useUser } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
 import * as Icons from "lucide-react";
 import Sidebar from "@/components/dashboard_v2/Sidebar";
 import ChatPanel from "@/components/dashboard_v2/ChatPanel";
@@ -19,18 +21,60 @@ import InfographicView from "@/components/dashboard_v2/InfographicView";
 import SlideDeckView from "@/components/dashboard_v2/SlideDeckView";
 import dummyData from "../../../dummy_data/dummy_data.json";
 
+// RAG API Configuration
+const RAG_API_URL = process.env.NEXT_PUBLIC_RAG_API_URL || "http://localhost:8002";
+
+// Types for RAG integration
+interface Document {
+    id: string;
+    filename: string;
+    chunks: number;
+    uploadedAt: Date;
+    status: "processing" | "ready" | "error";
+}
+
+interface Message {
+    id: string;
+    role: "user" | "assistant";
+    content: string;
+    timestamp: Date;
+    sources?: Array<{
+        id: string;
+        content_preview: string;
+        score: number;
+        metadata: Record<string, unknown>;
+    }>;
+}
+
+interface UploadProgress {
+    filename: string;
+    progress: number;
+    status: "uploading" | "processing" | "done" | "error";
+    error?: string;
+    chunks?: number;
+}
+
+interface RAGStats {
+    total_chunks: number;
+    status: string;
+}
+
 export default function DashboardV2() {
+    const { isSignedIn, isLoaded, user } = useUser();
+    const router = useRouter();
+
+    // Panel state
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [isStudioCollapsed, setIsStudioCollapsed] = useState(false);
+    const [sidebarWidth, setSidebarWidth] = useState(320);
+    const [studioWidth, setStudioWidth] = useState(384);
+
+    // Modal view states
     const [showArchitecture, setShowArchitecture] = useState(false);
     const [showFlashcards, setShowFlashcards] = useState(false);
     const [showReport, setShowReport] = useState(false);
     const [showQuiz, setShowQuiz] = useState(false);
     const [showUploadModal, setShowUploadModal] = useState(false);
-    const [hasNotebook, setHasNotebook] = useState(false);
-    const [isUploading, setIsUploading] = useState(false);
-
-    // Modal Views
     const [showAudio, setShowAudio] = useState(false);
     const [showVideo, setShowVideo] = useState(false);
     const [showInfographic, setShowInfographic] = useState(false);
@@ -41,25 +85,259 @@ export default function DashboardV2() {
     const [customizationType, setCustomizationType] = useState('');
     const [pendingGeneration, setPendingGeneration] = useState<string | undefined>(undefined);
 
-    const [sidebarWidth, setSidebarWidth] = useState(320);
-    const [studioWidth, setStudioWidth] = useState(384);
+    // RAG State
+    const [documents, setDocuments] = useState<Document[]>([]);
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [isQuerying, setIsQuerying] = useState(false);
+    const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);
+    const [stats, setStats] = useState<RAGStats | null>(null);
+    const [notebookTitle, setNotebookTitle] = useState("Untitled Notebook");
 
     const containerRef = useRef<HTMLDivElement>(null);
 
-    const handleCreateNotebook = () => {
-        setShowUploadModal(true);
+    // Redirect if not signed in
+    useEffect(() => {
+        if (isLoaded && !isSignedIn) {
+            router.push("/sign-in");
+        }
+    }, [isLoaded, isSignedIn, router]);
+
+    // Fetch RAG stats on mount
+    useEffect(() => {
+        fetchStats();
+    }, []);
+
+    // Update notebook title based on first document
+    useEffect(() => {
+        if (documents.length > 0 && notebookTitle === "Untitled Notebook") {
+            const firstDoc = documents[0];
+            const name = firstDoc.filename.replace(/\.[^/.]+$/, ""); // Remove extension
+            setNotebookTitle(name);
+        }
+    }, [documents, notebookTitle]);
+
+    const fetchStats = async () => {
+        try {
+            const response = await fetch(`${RAG_API_URL}/api/rag/stats`);
+            const data = await response.json();
+            setStats(data);
+        } catch (error) {
+            console.error("Failed to fetch stats:", error);
+        }
     };
 
-    const handleUploadComplete = () => {
-        setIsUploading(true);
-        setHasNotebook(false);
+    // File upload handler
+    const handleFileUpload = async (files: File[]) => {
+        const newProgress: UploadProgress[] = files.map((f) => ({
+            filename: f.name,
+            progress: 0,
+            status: "uploading" as const,
+        }));
+        setUploadProgress((prev) => [...prev, ...newProgress]);
+
+        const uploadPromises = files.map(async (file) => {
+            const formData = new FormData();
+            formData.append("file", file);
+
+            try {
+                setUploadProgress((prev) =>
+                    prev.map((p) =>
+                        p.filename === file.name ? { ...p, progress: 50, status: "processing" as const } : p
+                    )
+                );
+
+                const response = await fetch(`${RAG_API_URL}/api/rag/upload`, {
+                    method: "POST",
+                    body: formData,
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    setUploadProgress((prev) =>
+                        prev.map((p) =>
+                            p.filename === file.name
+                                ? { ...p, progress: 100, status: "done" as const, chunks: result.chunks_created }
+                                : p
+                        )
+                    );
+
+                    setDocuments((prev) => [
+                        {
+                            id: result.document_id,
+                            filename: file.name,
+                            chunks: result.chunks_created,
+                            uploadedAt: new Date(),
+                            status: "ready",
+                        },
+                        ...prev,
+                    ]);
+                } else {
+                    throw new Error(result.error || "Upload failed");
+                }
+            } catch (error) {
+                setUploadProgress((prev) =>
+                    prev.map((p) =>
+                        p.filename === file.name
+                            ? { ...p, status: "error" as const, error: String(error) }
+                            : p
+                    )
+                );
+            }
+        });
+
+        await Promise.all(uploadPromises);
+        fetchStats();
 
         setTimeout(() => {
-            setIsUploading(false);
-            setHasNotebook(true);
+            setUploadProgress((prev) => prev.filter((p) => p.status !== "done"));
         }, 3000);
     };
 
+    // Text/URL upload handler
+    const handleTextUpload = async (content: string, type: 'text' | 'website' | 'youtube') => {
+        const filename = type === 'text' ? 'Pasted Text' : content.substring(0, 50) + '...';
+
+        setUploadProgress((prev) => [...prev, {
+            filename,
+            progress: 0,
+            status: "uploading" as const,
+        }]);
+
+        try {
+            setUploadProgress((prev) =>
+                prev.map((p) =>
+                    p.filename === filename ? { ...p, progress: 50, status: "processing" as const } : p
+                )
+            );
+
+            // For now, we'll create a text blob and upload it
+            // In the future, you might want dedicated endpoints for URL scraping
+            const blob = new Blob([content], { type: 'text/plain' });
+            const file = new File([blob], `${type}_content_${Date.now()}.txt`, { type: 'text/plain' });
+
+            const formData = new FormData();
+            formData.append("file", file);
+
+            const response = await fetch(`${RAG_API_URL}/api/rag/upload`, {
+                method: "POST",
+                body: formData,
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                setUploadProgress((prev) =>
+                    prev.map((p) =>
+                        p.filename === filename
+                            ? { ...p, progress: 100, status: "done" as const, chunks: result.chunks_created }
+                            : p
+                    )
+                );
+
+                setDocuments((prev) => [
+                    {
+                        id: result.document_id,
+                        filename: filename,
+                        chunks: result.chunks_created,
+                        uploadedAt: new Date(),
+                        status: "ready",
+                    },
+                    ...prev,
+                ]);
+            } else {
+                throw new Error(result.error || "Upload failed");
+            }
+        } catch (error) {
+            setUploadProgress((prev) =>
+                prev.map((p) =>
+                    p.filename === filename
+                        ? { ...p, status: "error" as const, error: String(error) }
+                        : p
+                )
+            );
+        }
+
+        fetchStats();
+        setTimeout(() => {
+            setUploadProgress((prev) => prev.filter((p) => p.status !== "done"));
+        }, 3000);
+    };
+
+    // RAG Query handler
+    const handleQuery = async (query: string) => {
+        if (!query.trim() || isQuerying) return;
+
+        const userMessage: Message = {
+            id: Date.now().toString(),
+            role: "user",
+            content: query.trim(),
+            timestamp: new Date(),
+        };
+
+        setMessages((prev) => [...prev, userMessage]);
+        setIsQuerying(true);
+
+        try {
+            const response = await fetch(`${RAG_API_URL}/api/rag/query`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ query: query.trim(), top_k: 5 }),
+            });
+
+            const result = await response.json();
+
+            const assistantMessage: Message = {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: result.answer,
+                timestamp: new Date(),
+                sources: result.sources,
+            };
+
+            setMessages((prev) => [...prev, assistantMessage]);
+        } catch (error) {
+            const errorMessage: Message = {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: "Sorry, I encountered an error while querying the knowledge base. Please try again.",
+                timestamp: new Date(),
+            };
+            setMessages((prev) => [...prev, errorMessage]);
+        } finally {
+            setIsQuerying(false);
+        }
+    };
+
+    // Delete document
+    const handleDeleteDocument = async (documentId: string) => {
+        try {
+            await fetch(`${RAG_API_URL}/api/rag/document/${documentId}`, { method: "DELETE" });
+            setDocuments((prev) => prev.filter((d) => d.id !== documentId));
+            fetchStats();
+        } catch (error) {
+            console.error("Failed to delete document:", error);
+        }
+    };
+
+    // Clear all documents
+    const handleClearAll = async () => {
+        if (!confirm("Are you sure you want to clear all documents from the knowledge base?")) {
+            return;
+        }
+
+        try {
+            await fetch(`${RAG_API_URL}/api/rag/clear`, { method: "DELETE" });
+            setDocuments([]);
+            setMessages([]);
+            setNotebookTitle("Untitled Notebook");
+            fetchStats();
+        } catch (error) {
+            console.error("Failed to clear knowledge base:", error);
+        }
+    };
+
+    // Panel resize handlers
     const startResizingSidebar = useCallback((mouseDownEvent: React.MouseEvent) => {
         const startX = mouseDownEvent.pageX;
         const startWidth = sidebarWidth;
@@ -86,7 +364,6 @@ export default function DashboardV2() {
 
     const startResizingStudio = useCallback((mouseDownEvent: React.MouseEvent) => {
         const startX = mouseDownEvent.pageX;
-        const startWidth = studioWidth;
 
         const onMouseMove = (mouseMoveEvent: MouseEvent) => {
             if (!containerRef.current) return;
@@ -108,8 +385,9 @@ export default function DashboardV2() {
         document.addEventListener("mouseup", onMouseUp);
         document.body.style.cursor = "col-resize";
         document.body.style.userSelect = "none";
-    }, [studioWidth]);
+    }, []);
 
+    // Studio item click handler
     const handleItemClickFromStudio = (label: string) => {
         if (label === 'Mind Map' || label === 'Reports') {
             handleGenerateContent({}, label);
@@ -124,14 +402,37 @@ export default function DashboardV2() {
         console.log('Generating with config:', config, 'for:', generationLabel);
         setPendingGeneration(generationLabel);
         setShowCustomization(false);
-        // Clear it immediately after passing to trigger the effect in child
         setTimeout(() => setPendingGeneration(undefined), 100);
     };
+
+    const handleCreateNotebook = () => {
+        setShowUploadModal(true);
+    };
+
+    // Convert documents to source format for Sidebar
+    const sourcesForSidebar = documents.map(doc => ({
+        id: doc.id,
+        title: doc.filename,
+        chunks: doc.chunks,
+        status: doc.status,
+    }));
+
+    // Check if we have sources
+    const hasSources = documents.length > 0;
+    const isUploading = uploadProgress.some(p => p.status === "uploading" || p.status === "processing");
+
+    if (!isLoaded || !isSignedIn) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-50">
+                <div className="animate-pulse">Loading...</div>
+            </div>
+        );
+    }
 
     return (
         <div className="flex flex-col h-screen bg-[#f8fafc] overflow-hidden text-gray-900 font-sans" ref={containerRef}>
             <Header
-                title={isUploading ? "Uploading..." : hasNotebook ? "jAI Agent Framework for Enterprise AI Deployment" : "Untitled Notebook"}
+                title={isUploading ? "Uploading..." : notebookTitle}
                 onCreateNotebook={handleCreateNotebook}
             />
 
@@ -145,9 +446,13 @@ export default function DashboardV2() {
                         <Sidebar
                             isCollapsed={isSidebarCollapsed}
                             onToggle={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-                            sources={hasNotebook ? dummyData.sources : []}
+                            sources={sourcesForSidebar}
                             isUploading={isUploading}
                             onAddSource={() => setShowUploadModal(true)}
+                            uploadProgress={uploadProgress}
+                            onDeleteSource={handleDeleteDocument}
+                            onClearAll={handleClearAll}
+                            stats={stats}
                         />
                     </div>
                     {!isSidebarCollapsed && <ResizeHandle onMouseDown={startResizingSidebar} className="ml-1" />}
@@ -157,9 +462,13 @@ export default function DashboardV2() {
                 <div className="flex-1 flex flex-col min-w-0">
                     <div className="flex-1 bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
                         <ChatPanel
-                            hasSources={hasNotebook}
+                            hasSources={hasSources}
                             onUploadClick={() => setShowUploadModal(true)}
                             isUploading={isUploading}
+                            messages={messages}
+                            onSendMessage={handleQuery}
+                            isQuerying={isQuerying}
+                            stats={stats}
                         />
                     </div>
                 </div>
@@ -186,7 +495,7 @@ export default function DashboardV2() {
                             }}
                             onItemClick={handleItemClickFromStudio}
                             pendingGenerationLabel={pendingGeneration}
-                            hasSources={hasNotebook}
+                            hasSources={hasSources}
                             data={dummyData}
                         />
                     </div>
@@ -286,7 +595,8 @@ export default function DashboardV2() {
             {showUploadModal && (
                 <UploadModal
                     onClose={() => setShowUploadModal(false)}
-                    onUpload={handleUploadComplete}
+                    onUpload={handleFileUpload}
+                    onTextUpload={handleTextUpload}
                 />
             )}
         </div>

@@ -1,38 +1,57 @@
-import React, { useState } from 'react';
-import { X, Upload, Globe, FileText, Layout, Cloud, Copy, ArrowLeft } from 'lucide-react';
+import React, { useState, useRef, useCallback } from 'react';
+import { X, Upload, Globe, FileText, Layout, Cloud, Copy, ArrowLeft, FileUp } from 'lucide-react';
 
 interface UploadModalProps {
     onClose: () => void;
-    onUpload: () => void;
+    onUpload: (files: File[]) => void;
+    onTextUpload?: (content: string, type: 'text' | 'website' | 'youtube') => void;
 }
 
-const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUpload }) => {
+const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUpload, onTextUpload }) => {
     const [mode, setMode] = useState<'initial' | 'website' | 'youtube' | 'text'>('initial');
     const [inputValue, setInputValue] = useState('');
-    const [isInternalUploading, setIsInternalUploading] = useState(false);
-    const [uploadProgress, setUploadProgress] = useState(0);
+    const [dragActive, setDragActive] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const startSimulatedUpload = () => {
-        setIsInternalUploading(true);
-        setUploadProgress(0);
+    const handleDrag = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.type === "dragenter" || e.type === "dragover") {
+            setDragActive(true);
+        } else if (e.type === "dragleave") {
+            setDragActive(false);
+        }
+    }, []);
 
-        const interval = setInterval(() => {
-            setUploadProgress(prev => {
-                if (prev >= 100) {
-                    clearInterval(interval);
-                    onUpload();
-                    onClose();
-                    return 100;
-                }
-                return prev + 5;
-            });
-        }, 100);
+    const handleDrop = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDragActive(false);
+
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            const files = Array.from(e.dataTransfer.files);
+            onUpload(files);
+            onClose();
+        }
+    }, [onUpload, onClose]);
+
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files.length > 0) {
+            const files = Array.from(e.target.files);
+            onUpload(files);
+            onClose();
+        }
     };
 
     const handleInsert = () => {
-        if (inputValue.trim()) {
-            startSimulatedUpload();
+        if (inputValue.trim() && onTextUpload) {
+            onTextUpload(inputValue.trim(), mode as 'text' | 'website' | 'youtube');
+            onClose();
         }
+    };
+
+    const handleUploadClick = () => {
+        fileInputRef.current?.click();
     };
 
     return (
@@ -54,9 +73,9 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUpload }) => {
                             <span className="font-bold text-lg">j</span>
                         </div>
                         <h2 className="text-2xl font-semibold text-gray-900">
-                            {mode === 'initial' ? 'NotebookLM' :
+                            {mode === 'initial' ? 'Knowledge Base' :
                                 mode === 'youtube' ? 'YouTube' :
-                                    mode === 'website' ? 'Website' : 'Copied text'}
+                                    mode === 'website' ? 'Website' : 'Paste Text'}
                         </h2>
                     </div>
                     <button
@@ -72,55 +91,56 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUpload }) => {
                     {mode === 'initial' ? (
                         <>
                             <p className="text-gray-500 font-medium">
-                                (Examples: marketing plans, course reading, research notes, meeting transcripts, sales documents, etc.)
+                                Upload documents to build your knowledge base. Ask questions and get AI-powered answers.
                             </p>
 
+                            {/* Upload Area */}
                             <div
-                                onClick={startSimulatedUpload}
-                                className="border-2 border-dashed border-gray-200 rounded-[28px] p-12 flex flex-col items-center justify-center gap-4 bg-gray-50/50 hover:bg-gray-100/50 hover:border-blue-400 cursor-pointer transition-all group relative overflow-hidden"
+                                onClick={handleUploadClick}
+                                onDragEnter={handleDrag}
+                                onDragLeave={handleDrag}
+                                onDragOver={handleDrag}
+                                onDrop={handleDrop}
+                                className={`border-2 border-dashed rounded-[28px] p-12 flex flex-col items-center justify-center gap-4 cursor-pointer transition-all group relative overflow-hidden ${
+                                    dragActive
+                                        ? 'border-purple-500 bg-purple-50'
+                                        : 'border-gray-200 bg-gray-50/50 hover:bg-gray-100/50 hover:border-purple-400'
+                                }`}
                             >
-                                {isInternalUploading ? (
-                                    <div className="flex flex-col items-center gap-4 w-full px-12">
-                                        <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center text-blue-500 animate-pulse">
-                                            <Upload size={32} />
-                                        </div>
-                                        <div className="w-full space-y-2">
-                                            <div className="flex justify-between text-xs font-bold text-gray-500 uppercase tracking-wider">
-                                                <span>Uploading...</span>
-                                                <span>{uploadProgress}%</span>
-                                            </div>
-                                            <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
-                                                <div
-                                                    className="h-full bg-blue-600 transition-all duration-100"
-                                                    style={{ width: `${uploadProgress}%` }}
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <>
-                                        <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center text-blue-500 group-hover:scale-110 transition-transform">
-                                            <Upload size={32} />
-                                        </div>
-                                        <div className="text-center">
-                                            <h3 className="text-xl font-semibold text-gray-900">Upload sources</h3>
-                                            <p className="text-gray-500 mt-1 font-medium">
-                                                Drag & drop or <span className="text-blue-600 hover:underline">choose file</span> to upload
-                                            </p>
-                                        </div>
-                                    </>
-                                )}
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    multiple
+                                    accept=".pdf,.docx,.doc,.txt,.md,.html,.json,.csv"
+                                    onChange={handleFileSelect}
+                                    className="hidden"
+                                />
+                                <div className={`w-16 h-16 rounded-full flex items-center justify-center transition-transform ${
+                                    dragActive ? 'bg-purple-100 text-purple-600 scale-110' : 'bg-purple-50 text-purple-500 group-hover:scale-110'
+                                }`}>
+                                    {dragActive ? <FileUp size={32} /> : <Upload size={32} />}
+                                </div>
+                                <div className="text-center">
+                                    <h3 className="text-xl font-semibold text-gray-900">
+                                        {dragActive ? 'Drop files to upload' : 'Upload sources'}
+                                    </h3>
+                                    <p className="text-gray-500 mt-1 font-medium">
+                                        {dragActive ? 'Release to upload your files' : (
+                                            <>Drag & drop or <span className="text-purple-600 hover:underline">choose file</span> to upload</>
+                                        )}
+                                    </p>
+                                </div>
                             </div>
 
                             <p className="text-[10px] text-gray-400 text-center font-medium">
-                                Supported file types: PDF, .txt, Markdown, Audio (e.g. mp3), .docx, .avif, .bmp, .gif, .ico, .jp2, .png, .webp, .tif, .tiff, .heic, .heif, .jpeg, .jpg, .jpe
+                                Supported file types: PDF, .txt, Markdown, .docx, .html, .json, .csv
                             </p>
 
                             <div className="grid grid-cols-3 gap-6 pt-4">
                                 <div className="space-y-3">
                                     <div className="flex items-center gap-2 text-xs font-bold text-gray-600 uppercase tracking-wider">
                                         <Cloud size={16} />
-                                        Google Workspace
+                                        Cloud Storage
                                     </div>
                                     <button className="w-full flex items-center gap-3 p-3 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors font-semibold text-gray-700">
                                         <div className="w-6 h-6 flex items-center justify-center">
@@ -162,8 +182,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUpload }) => {
                                         onClick={() => setMode('text')}
                                         className="w-full flex items-center gap-3 p-3 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors font-semibold text-gray-700"
                                     >
-                                        <Copy size={18} className="text-blue-500" />
-                                        Copied text
+                                        <Copy size={18} className="text-purple-500" />
+                                        Paste content
                                     </button>
                                 </div>
                             </div>
@@ -172,15 +192,15 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUpload }) => {
                         <div className="space-y-6 py-4">
                             <div className="space-y-2">
                                 <label className="text-sm font-semibold text-gray-700">
-                                    {mode === 'youtube' ? 'YouTube URL' : mode === 'website' ? 'Website URL' : 'Paste content'}
+                                    {mode === 'youtube' ? 'YouTube URL' : mode === 'website' ? 'Website URL' : 'Paste your content'}
                                 </label>
                                 {mode === 'text' ? (
                                     <textarea
                                         autoFocus
                                         value={inputValue}
                                         onChange={(e) => setInputValue(e.target.value)}
-                                        placeholder="Paste your content here..."
-                                        className="w-full h-48 p-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-500/5 focus:border-blue-400 transition-all font-medium text-gray-700 resize-none"
+                                        placeholder="Paste your content here... This will be indexed and searchable in your knowledge base."
+                                        className="w-full h-48 p-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-purple-500/10 focus:border-purple-400 transition-all font-medium text-gray-700 resize-none"
                                     />
                                 ) : (
                                     <input
@@ -189,17 +209,25 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUpload }) => {
                                         value={inputValue}
                                         onChange={(e) => setInputValue(e.target.value)}
                                         placeholder={mode === 'youtube' ? "https://www.youtube.com/watch?v=..." : "https://example.com"}
-                                        className="w-full p-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-500/5 focus:border-blue-400 transition-all font-medium text-gray-700"
+                                        className="w-full p-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-purple-500/10 focus:border-purple-400 transition-all font-medium text-gray-700"
                                     />
+                                )}
+                                {mode !== 'text' && (
+                                    <p className="text-xs text-gray-400 mt-2">
+                                        {mode === 'youtube'
+                                            ? 'The video transcript will be extracted and indexed.'
+                                            : 'The webpage content will be scraped and indexed.'
+                                        }
+                                    </p>
                                 )}
                             </div>
                             <div className="flex justify-end pt-4">
                                 <button
                                     onClick={handleInsert}
                                     disabled={!inputValue.trim()}
-                                    className="px-8 py-2.5 bg-black text-white rounded-full font-semibold hover:bg-gray-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                                    className="px-8 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-full font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-purple-500/20"
                                 >
-                                    Insert
+                                    Add to Knowledge Base
                                 </button>
                             </div>
                         </div>
@@ -207,7 +235,9 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUpload }) => {
                 </div>
 
                 <div className="p-4 bg-gray-50 border-t border-gray-100 text-center">
-                    <p className="text-[10px] text-gray-400 font-medium">NotebookLM can be inaccurate; please double check its responses.</p>
+                    <p className="text-[10px] text-gray-400 font-medium">
+                        Documents are processed locally and indexed for semantic search.
+                    </p>
                 </div>
             </div>
         </div>
