@@ -1,13 +1,11 @@
 import { FC, RefObject } from "react";
 import { Mic, MicOff, Square, X, ArrowUpRight, Loader2 } from "lucide-react";
-import { transcribeAudio } from "@/lib/api";
 
 interface MessageInputProps {
     input: string;
     setInput: (value: string) => void;
     onSend: () => void;
     inputRef: RefObject<HTMLTextAreaElement | null>;
-    chatMode: "chat" | "research";
     hasSources: boolean;
     isUploading: boolean;
     isQuerying: boolean;
@@ -30,7 +28,6 @@ export const MessageInput: FC<MessageInputProps> = ({
     setInput,
     onSend,
     inputRef,
-    chatMode,
     hasSources,
     isUploading,
     isQuerying,
@@ -53,8 +50,8 @@ export const MessageInput: FC<MessageInputProps> = ({
         }
     };
 
-    // Research mode doesn't require sources
-    const isDisabled = isUploading || (chatMode === "chat" && !hasSources) || !isConnected;
+    // Smart chat can work even without sources (for general chat)
+    const isDisabled = isUploading || !isConnected;
 
     return (
         <div className="p-4 bg-white shrink-0 border-t border-gray-100">
@@ -124,11 +121,7 @@ export const MessageInput: FC<MessageInputProps> = ({
                     placeholder={
                         isUploading
                             ? "Processing documents..."
-                            : chatMode === "research"
-                                ? "Ask a research question..."
-                                : !hasSources
-                                    ? "Upload a source to get started"
-                                    : "Ask a question about your documents..."
+                            : "Ask anything..."
                     }
                     className="w-full bg-[#f8fafc] border border-gray-200 rounded-2xl py-3 pl-4 pr-32 text-sm outline-none transition-all focus:bg-white focus:ring-4 focus:ring-purple-500/10 focus:border-purple-300 disabled:opacity-50 disabled:cursor-not-allowed resize-none max-h-[200px]"
                     disabled={isDisabled}
@@ -163,13 +156,8 @@ export const MessageInput: FC<MessageInputProps> = ({
                 </div>
             </div>
             <p className="text-[10px] text-gray-400 text-center mt-2 font-medium">
-                {chatMode === "research"
-                    ? "Research mode: Comprehensive answers with citations"
-                    : !hasSources
-                        ? "Upload documents to enable querying"
-                        : "Answers are generated based on your uploaded documents"}
+                Smart chat auto-detects when to search your knowledge base
             </p>
         </div>
     );
 };
-

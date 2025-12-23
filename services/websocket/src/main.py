@@ -8,8 +8,7 @@ from contextlib import asynccontextmanager
 
 from .config import get_settings
 from .connection_manager import manager
-from .handlers.chat_handler import handle_chat_message
-from .handlers.research_handler import handle_research_message
+from .handlers.smart_handler import handle_smart_message
 from .models.messages import ChatResponse, SystemMessage, ErrorMessage
 from .routes import transcription, meetings
 
@@ -162,35 +161,20 @@ async def websocket_chat_endpoint(websocket: WebSocket, session_id: str):
                 await manager.send_personal_message(error_msg.model_dump(mode="json"), websocket)
                 continue
             
-            # Handle different message types
+            # Handle all message types with smart routing
+            # The smart handler auto-detects intent (chat vs research vs hybrid)
             message_type = message_data.get("type", "message")
-            
-            if message_type == "message":
-                # Process chat message
-                response = await handle_chat_message(websocket, message_data, session_id)
-                
+
+            if message_type in ("message", "research", "smart"):
+                # Process with smart handler (auto-detects intent)
+                response = await handle_smart_message(websocket, message_data, session_id)
+
                 if response:
                     # Send response back to sender
                     await manager.send_personal_message(
                         response.model_dump(mode="json"), websocket
                     )
-                    
-                    # Broadcast to all other users in the session (for shared chats)
-                    await manager.broadcast_to_session(
-                        response.model_dump(mode="json"),
-                        session_id,
-                        exclude=websocket,
-                    )
-            elif message_type == "research":
-                # Process research message
-                response = await handle_research_message(websocket, message_data, session_id)
-                
-                if response:
-                    # Send response back to sender
-                    await manager.send_personal_message(
-                        response.model_dump(mode="json"), websocket
-                    )
-                    
+
                     # Broadcast to all other users in the session (for shared chats)
                     await manager.broadcast_to_session(
                         response.model_dump(mode="json"),

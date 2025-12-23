@@ -5,15 +5,24 @@ import { useWebSocket } from "./useWebSocket";
 import { WebSocketMessage, WebSocketStatus } from "./types";
 import { Message } from "@/lib/chat/types";
 
+// Processing status for showing what the system is doing
+interface ProcessingStatus {
+  intent: "general_chat" | "knowledge_query" | "hybrid";
+  description: string;
+}
+
 interface WebSocketContextValue {
   status: WebSocketStatus;
   error: string | null;
-  sendMessage: (content: string, sessionId: string) => boolean;
-  sendResearchMessage: (content: string, sessionId: string, researchParams?: { top_k?: number; filters?: Record<string, unknown>; use_rag?: boolean }) => boolean;
+  sendMessage: (content: string, sessionId?: string) => boolean;
+  // Keep sendResearchMessage for backwards compatibility - now just calls sendMessage
+  sendResearchMessage: (content: string, sessionId?: string, researchParams?: { top_k?: number; filters?: Record<string, unknown>; use_rag?: boolean }) => boolean;
   messages: Message[];
   isConnected: boolean;
   sessionId: string | null;
   setSessionId: (id: string | null) => void;
+  // Processing status for UI feedback
+  processingStatus: ProcessingStatus | null;
 }
 
 const WebSocketContext = createContext<WebSocketContextValue | undefined>(undefined);
@@ -31,6 +40,7 @@ export function WebSocketProvider({
 }: WebSocketProviderProps) {
   const [sessionId, setSessionIdState] = useState<string | null>(initialSessionId || null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [processingStatus, setProcessingStatus] = useState<ProcessingStatus | null>(null);
 
   // Get WebSocket URL from environment or use default
   const getWebSocketUrl = useCallback((sessionId: string | null) => {
@@ -47,6 +57,15 @@ export function WebSocketProvider({
 
   const handleMessage = useCallback((wsMessage: WebSocketMessage) => {
     if (!wsMessage.session_id) return;
+
+    // Handle status updates (shows what the system is doing)
+    if (wsMessage.type === "status") {
+      setProcessingStatus({
+        intent: (wsMessage.intent as ProcessingStatus["intent"]) || "general_chat",
+        description: wsMessage.description || "Processing...",
+      });
+      return;
+    }
 
     // Handle system messages
     if (wsMessage.type === "system") {
@@ -74,6 +93,7 @@ export function WebSocketProvider({
 
     // Handle error messages
     if (wsMessage.type === "error") {
+      setProcessingStatus(null); // Clear processing status
       setMessages((prev) => {
         const errorMessage: Message = {
           id: `error-${Date.now()}-${Math.random()}`,
@@ -89,6 +109,7 @@ export function WebSocketProvider({
 
     // Handle regular chat messages and research messages
     if ((wsMessage.type === "message" || wsMessage.type === "research") && wsMessage.content) {
+      setProcessingStatus(null); // Clear processing status when response arrives
       setMessages((prev) => {
         // Check if message already exists to prevent duplicates
         const messageId = wsMessage.message_id || `msg-${Date.now()}`;
@@ -97,8 +118,8 @@ export function WebSocketProvider({
 
         const message: Message = {
           id: messageId,
-          role: (wsMessage.role === "user" || wsMessage.role === "assistant" || wsMessage.role === "system") 
-            ? wsMessage.role 
+          role: (wsMessage.role === "user" || wsMessage.role === "assistant" || wsMessage.role === "system")
+            ? wsMessage.role
             : "assistant",
           content: wsMessage.content || "",
           timestamp: wsMessage.timestamp ? new Date(wsMessage.timestamp) : new Date(),
@@ -165,43 +186,14 @@ export function WebSocketProvider({
     [sessionId, wsSendMessage]
   );
 
+  // sendResearchMessage now just calls sendMessage for backwards compatibility
+  // The smart handler on the backend auto-detects intent
   const sendResearchMessage = useCallback(
-    (content: string, targetSessionId?: string, researchParams?: { top_k?: number; filters?: Record<string, unknown>; use_rag?: boolean }) => {
-      const targetId = targetSessionId || sessionId;
-      if (!targetId) {
-        console.error("No session ID available");
-        return false;
-      }
-
-      // Check if message was already sent (prevent duplicates)
-      const messageId = `research-${Date.now()}-${Math.random()}`;
-      const userMessage: Message = {
-        id: messageId,
-        role: "user",
-        content,
-        timestamp: new Date(),
-        metadata: { messageType: "research" },
-      };
-
-      // Add user message to local state immediately
-      setMessages((prev) => {
-        // Prevent duplicate messages
-        const exists = prev.some((msg) => msg.id === messageId || (msg.content === content && msg.role === "user" && Date.now() - msg.timestamp.getTime() < 1000));
-        if (exists) return prev;
-        return [...prev, userMessage];
-      });
-
-      // Send via WebSocket
-      const success = wsSendMessage({
-        type: "research",
-        content,
-        session_id: targetId,
-        research_params: researchParams,
-      });
-
-      return success;
+    (content: string, targetSessionId?: string, _researchParams?: { top_k?: number; filters?: Record<string, unknown>; use_rag?: boolean }) => {
+      // Just delegate to sendMessage - smart handler will detect intent
+      return sendMessage(content, targetSessionId);
     },
-    [sessionId, wsSendMessage]
+    [sendMessage]
   );
 
   const setSessionId = useCallback(
@@ -236,6 +228,7 @@ export function WebSocketProvider({
     isConnected: status === "connected",
     sessionId,
     setSessionId,
+    processingStatus,
   };
 
   return <WebSocketContext.Provider value={value}>{children}</WebSocketContext.Provider>;

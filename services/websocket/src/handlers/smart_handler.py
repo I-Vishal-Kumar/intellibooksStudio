@@ -1,0 +1,363 @@
+"""Smart message handler with automatic intent detection.
+
+This handler automatically determines whether to:
+- Use general chat (no RAG needed)
+- Query the knowledge base (RAG search)
+- Combine both (hybrid mode)
+
+Based on the user's message content and context.
+"""
+
+import asyncio
+import logging
+import re
+import sys
+from datetime import datetime
+from typing import Optional, Dict, Any, Tuple
+from uuid import uuid4
+from pathlib import Path
+from enum import Enum
+
+from ..models.messages import ChatMessage, ChatResponse
+from ..connection_manager import manager
+
+logger = logging.getLogger(__name__)
+
+# Import agents with proper path resolution
+project_root = Path(__file__).parent.parent.parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+try:
+    from services.agents.src.agents.chat_agent import ChatAgent
+    CHAT_AGENT_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"ChatAgent not available: {e}")
+    ChatAgent = None
+    CHAT_AGENT_AVAILABLE = False
+
+try:
+    from services.agents.src.agents.research_agent import ResearchAgent
+    RESEARCH_AGENT_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"ResearchAgent not available: {e}")
+    ResearchAgent = None
+    RESEARCH_AGENT_AVAILABLE = False
+
+
+class MessageIntent(Enum):
+    """Detected intent for a message."""
+    GENERAL_CHAT = "general_chat"
+    KNOWLEDGE_QUERY = "knowledge_query"
+    HYBRID = "hybrid"
+
+
+# Keywords and patterns that suggest knowledge base queries
+KNOWLEDGE_QUERY_PATTERNS = [
+    # Question words that typically need knowledge
+    r"\b(what|who|when|where|why|how|which|explain|describe|tell me about)\b.*\?",
+    r"\b(what is|what are|what was|what were|who is|who are)\b",
+
+    # Action words suggesting research/lookup
+    r"\b(find|search|look up|lookup|retrieve|get|fetch)\b",
+    r"\b(summarize|summary|overview|recap)\b",
+
+    # Reference to documents/transcripts/meetings
+    r"\b(document|file|transcript|meeting|recording|notes|source)\b",
+    r"\b(in the|from the|according to|based on)\b.*\b(document|file|transcript|meeting)\b",
+
+    # Comparative/analytical queries
+    r"\b(compare|difference|between|versus|vs)\b",
+    r"\b(list|enumerate|give me|show me|provide)\b",
+
+    # Time-based queries about content
+    r"\b(discussed|mentioned|talked about|said about|covered)\b",
+    r"\b(last|previous|recent|earlier)\b.*\b(meeting|transcript|session)\b",
+]
+
+# Patterns that suggest general chat (no RAG needed)
+GENERAL_CHAT_PATTERNS = [
+    # Greetings and pleasantries
+    r"^(hi|hello|hey|good morning|good afternoon|good evening|greetings)\b",
+    r"^(thanks|thank you|thx|appreciate it)\b",
+    r"^(bye|goodbye|see you|later|take care)\b",
+
+    # Simple acknowledgments
+    r"^(ok|okay|sure|got it|understood|makes sense|i see|alright)\b",
+    r"^(yes|no|maybe|perhaps)\b$",
+
+    # About the assistant itself
+    r"\b(who are you|what are you|what can you do|help me|how do you work)\b",
+
+    # Simple math or conversions (no knowledge needed)
+    r"^\d+\s*[\+\-\*\/]\s*\d+",
+
+    # Code-related that doesn't need knowledge base
+    r"^(write|create|generate)\s+(a |an )?(code|function|script|program)\b",
+]
+
+
+def detect_intent(message: str) -> Tuple[MessageIntent, float]:
+    """
+    Detect the intent of a message.
+
+    Returns:
+        Tuple of (intent, confidence)
+    """
+    message_lower = message.lower().strip()
+
+    # Check for general chat patterns first
+    for pattern in GENERAL_CHAT_PATTERNS:
+        if re.search(pattern, message_lower, re.IGNORECASE):
+            return MessageIntent.GENERAL_CHAT, 0.9
+
+    # Check for knowledge query patterns
+    knowledge_matches = 0
+    for pattern in KNOWLEDGE_QUERY_PATTERNS:
+        if re.search(pattern, message_lower, re.IGNORECASE):
+            knowledge_matches += 1
+
+    # If multiple knowledge patterns match, high confidence it's a knowledge query
+    if knowledge_matches >= 2:
+        return MessageIntent.KNOWLEDGE_QUERY, 0.95
+    elif knowledge_matches == 1:
+        return MessageIntent.KNOWLEDGE_QUERY, 0.75
+
+    # Check message length and question marks
+    is_question = message.strip().endswith("?")
+    is_long = len(message) > 50
+
+    # Long questions are likely knowledge queries
+    if is_question and is_long:
+        return MessageIntent.KNOWLEDGE_QUERY, 0.7
+
+    # Short questions might be either
+    if is_question:
+        return MessageIntent.HYBRID, 0.5
+
+    # Default to general chat for short messages
+    if len(message) < 30:
+        return MessageIntent.GENERAL_CHAT, 0.6
+
+    # For medium-length non-questions, use hybrid approach
+    return MessageIntent.HYBRID, 0.5
+
+
+def get_intent_description(intent: MessageIntent) -> str:
+    """Get a human-readable description of what the system is doing."""
+    descriptions = {
+        MessageIntent.GENERAL_CHAT: "Thinking...",
+        MessageIntent.KNOWLEDGE_QUERY: "Searching knowledge base...",
+        MessageIntent.HYBRID: "Analyzing query and searching knowledge...",
+    }
+    return descriptions.get(intent, "Processing...")
+
+
+async def send_status_update(
+    websocket,
+    session_id: str,
+    status: str,
+    intent: MessageIntent,
+):
+    """Send a status update to the client about what's happening."""
+    try:
+        status_message = {
+            "type": "status",
+            "session_id": session_id,
+            "status": status,
+            "intent": intent.value,
+            "description": get_intent_description(intent),
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        await manager.send_personal_message(status_message, websocket)
+    except Exception as e:
+        logger.warning(f"Failed to send status update: {e}")
+
+
+async def process_with_chat_agent(message: ChatMessage) -> ChatResponse:
+    """Process message with chat agent (no RAG)."""
+    if not CHAT_AGENT_AVAILABLE or ChatAgent is None:
+        return ChatResponse(
+            type="message",
+            content="I'm here to help! However, the chat service is currently initializing. Please try again in a moment.",
+            role="assistant",
+            session_id=message.session_id,
+            message_id=str(uuid4()),
+            timestamp=datetime.utcnow(),
+            metadata={"intent": "general_chat", "rag_used": False},
+        )
+
+    chat_agent = ChatAgent()
+    agent_result = await chat_agent.safe_execute({
+        "message": message.content,
+        "text": message.content,
+    })
+
+    if agent_result.success and agent_result.data:
+        response_content = agent_result.data.get("response", "I apologize, I couldn't generate a response.")
+        return ChatResponse(
+            type="message",
+            content=response_content,
+            role="assistant",
+            session_id=message.session_id,
+            message_id=str(uuid4()),
+            timestamp=datetime.utcnow(),
+            metadata={
+                "intent": "general_chat",
+                "rag_used": False,
+                "agent_id": agent_result.metadata.get("agent_id", "chat-agent") if agent_result.metadata else "chat-agent",
+            },
+        )
+    else:
+        return ChatResponse(
+            type="message",
+            content="I encountered an issue processing your message. Please try again.",
+            role="assistant",
+            session_id=message.session_id,
+            message_id=str(uuid4()),
+            timestamp=datetime.utcnow(),
+            metadata={"intent": "general_chat", "rag_used": False, "error": True},
+        )
+
+
+async def process_with_research_agent(message: ChatMessage) -> ChatResponse:
+    """Process message with research agent (RAG enabled)."""
+    if not RESEARCH_AGENT_AVAILABLE or ResearchAgent is None:
+        return ChatResponse(
+            type="message",
+            content="I'd like to search the knowledge base for you, but the research service is currently initializing. Please try again in a moment.",
+            role="assistant",
+            session_id=message.session_id,
+            message_id=str(uuid4()),
+            timestamp=datetime.utcnow(),
+            metadata={"intent": "knowledge_query", "rag_used": False},
+        )
+
+    research_agent = ResearchAgent()
+    agent_result = await research_agent.safe_execute({
+        "query": message.content,
+        "question": message.content,
+        "message": message.content,
+        "text": message.content,
+    })
+
+    if agent_result.success and agent_result.data:
+        response_data = agent_result.data
+        response_content = response_data.get("response", response_data.get("answer", "I couldn't find relevant information."))
+        sources = response_data.get("sources", [])
+        confidence = response_data.get("confidence", 0.0)
+
+        return ChatResponse(
+            type="message",
+            content=response_content,
+            role="assistant",
+            session_id=message.session_id,
+            message_id=str(uuid4()),
+            timestamp=datetime.utcnow(),
+            metadata={
+                "intent": "knowledge_query",
+                "rag_used": True,
+                "sources": sources,
+                "sources_count": len(sources),
+                "confidence": confidence,
+                "agent_id": agent_result.metadata.get("agent_id", "research-agent") if agent_result.metadata else "research-agent",
+            },
+        )
+    else:
+        # Fallback to chat agent if research fails
+        logger.warning("Research agent failed, falling back to chat agent")
+        return await process_with_chat_agent(message)
+
+
+async def process_smart_message(
+    message: ChatMessage,
+    websocket=None,
+) -> ChatResponse:
+    """
+    Process a message using smart intent detection.
+
+    Automatically determines whether to use:
+    - General chat (no RAG)
+    - Knowledge base search (RAG)
+    - Hybrid approach
+    """
+    logger.info(f"Processing smart message for session {message.session_id}")
+
+    # Detect intent
+    intent, confidence = detect_intent(message.content)
+    logger.info(f"Detected intent: {intent.value} (confidence: {confidence:.2f})")
+
+    # Send status update to client if websocket provided
+    if websocket:
+        await send_status_update(websocket, message.session_id, "processing", intent)
+
+    try:
+        if intent == MessageIntent.GENERAL_CHAT:
+            response = await process_with_chat_agent(message)
+        elif intent == MessageIntent.KNOWLEDGE_QUERY:
+            response = await process_with_research_agent(message)
+        else:  # HYBRID
+            # Try research first, if no good results fall back to chat
+            response = await process_with_research_agent(message)
+
+            # If no sources found or low confidence, enhance with chat
+            sources = response.metadata.get("sources", []) if response.metadata else []
+            rag_confidence = response.metadata.get("confidence", 0) if response.metadata else 0
+
+            if len(sources) == 0 or rag_confidence < 0.3:
+                logger.info("Low RAG confidence, using chat agent for hybrid response")
+                chat_response = await process_with_chat_agent(message)
+                # Combine responses if both have content
+                if chat_response.content and response.content:
+                    response.metadata["hybrid"] = True
+
+        # Add intent info to response
+        if response.metadata is None:
+            response.metadata = {}
+        response.metadata["detected_intent"] = intent.value
+        response.metadata["intent_confidence"] = confidence
+
+        return response
+
+    except Exception as e:
+        logger.exception(f"Error processing smart message: {e}")
+        return ChatResponse(
+            type="error",
+            content=f"I encountered an error: {str(e)}. Please try again.",
+            role="assistant",
+            session_id=message.session_id,
+            message_id=str(uuid4()),
+            timestamp=datetime.utcnow(),
+            metadata={"error": True, "intent": intent.value},
+        )
+
+
+async def handle_smart_message(
+    websocket,
+    message_data: dict,
+    session_id: str,
+) -> Optional[ChatResponse]:
+    """Handle an incoming message with smart routing."""
+    try:
+        # Validate message
+        message_data["session_id"] = session_id
+        if "type" not in message_data:
+            message_data["type"] = "message"
+
+        chat_message = ChatMessage(**message_data)
+
+        # Process with smart handler
+        response = await process_smart_message(chat_message, websocket)
+
+        return response
+
+    except Exception as e:
+        logger.error(f"Error handling smart message: {e}")
+        return ChatResponse(
+            type="error",
+            content=f"Error processing message: {str(e)}",
+            role="assistant",
+            session_id=session_id,
+            message_id=str(uuid4()),
+            timestamp=datetime.utcnow(),
+        )

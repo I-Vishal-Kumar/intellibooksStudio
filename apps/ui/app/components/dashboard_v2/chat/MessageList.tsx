@@ -1,5 +1,5 @@
 import { FC, RefObject } from "react";
-import { PlusSquare, Copy, ThumbsUp, ThumbsDown, Clock, BookOpen, Brain, Loader2 } from "lucide-react";
+import { PlusSquare, Copy, ThumbsUp, ThumbsDown, Clock, Loader2, Sparkles, Database, MessageCircle } from "lucide-react";
 
 interface Message {
     id: string;
@@ -15,17 +15,97 @@ interface Message {
     metadata?: Record<string, unknown>;
 }
 
+// Processing status from smart handler
+interface ProcessingStatus {
+    intent: "general_chat" | "knowledge_query" | "hybrid";
+    description: string;
+}
+
 interface MessageListProps {
     messages: Message[];
     isQuerying: boolean;
-    chatMode: "chat" | "research";
+    processingStatus?: ProcessingStatus | null;
     messagesEndRef: RefObject<HTMLDivElement | null>;
 }
+
+// Get icon and color based on intent/message type
+const getMessageIcon = (metadata?: Record<string, unknown>) => {
+    const intent = metadata?.detected_intent as string;
+    const ragUsed = metadata?.rag_used as boolean;
+
+    if (ragUsed || intent === "knowledge_query") {
+        return <Database className="w-4 h-4 text-white" />;
+    } else if (intent === "hybrid") {
+        return <Sparkles className="w-4 h-4 text-white" />;
+    } else {
+        return <MessageCircle className="w-4 h-4 text-white" />;
+    }
+};
+
+// Get loading icon and text based on processing status
+const getLoadingInfo = (processingStatus?: ProcessingStatus | null) => {
+    if (!processingStatus) {
+        return {
+            icon: <Sparkles className="w-4 h-4 text-white" />,
+            text: "Thinking...",
+            color: "from-purple-500 to-purple-600",
+        };
+    }
+
+    switch (processingStatus.intent) {
+        case "knowledge_query":
+            return {
+                icon: <Database className="w-4 h-4 text-white" />,
+                text: processingStatus.description || "Searching knowledge base...",
+                color: "from-blue-500 to-blue-600",
+            };
+        case "hybrid":
+            return {
+                icon: <Sparkles className="w-4 h-4 text-white" />,
+                text: processingStatus.description || "Analyzing query and searching knowledge...",
+                color: "from-purple-500 to-pink-500",
+            };
+        case "general_chat":
+        default:
+            return {
+                icon: <MessageCircle className="w-4 h-4 text-white" />,
+                text: processingStatus.description || "Thinking...",
+                color: "from-purple-500 to-purple-600",
+            };
+    }
+};
+
+// Badge component for showing what action was taken
+const ActionBadge: FC<{ metadata?: Record<string, unknown> }> = ({ metadata }) => {
+    const intent = metadata?.detected_intent as string;
+    const ragUsed = metadata?.rag_used as boolean;
+    const sourcesCount = metadata?.sources_count as number;
+
+    if (!intent && !ragUsed) return null;
+
+    if (ragUsed || intent === "knowledge_query") {
+        return (
+            <div className="flex items-center gap-1 text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+                <Database className="w-3 h-3" />
+                <span>Knowledge{sourcesCount ? ` (${sourcesCount} sources)` : ""}</span>
+            </div>
+        );
+    } else if (intent === "hybrid") {
+        return (
+            <div className="flex items-center gap-1 text-xs text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">
+                <Sparkles className="w-3 h-3" />
+                <span>Smart</span>
+            </div>
+        );
+    }
+
+    return null;
+};
 
 export const MessageList: FC<MessageListProps> = ({
     messages,
     isQuerying,
-    chatMode,
+    processingStatus,
     messagesEndRef,
 }) => {
     return (
@@ -44,14 +124,17 @@ export const MessageList: FC<MessageListProps> = ({
                     >
                         {message.role === "assistant" && (
                             <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg flex items-center justify-center shrink-0">
-                                {message.metadata?.messageType === "research" ? (
-                                    <Brain className="w-4 h-4 text-white" />
-                                ) : (
-                                    <BookOpen className="w-4 h-4 text-white" />
-                                )}
+                                {getMessageIcon(message.metadata)}
                             </div>
                         )}
                         <div className={message.role === "user" ? "" : "flex-1"}>
+                            {/* Action badge for assistant messages */}
+                            {message.role === "assistant" && (
+                                <div className="mb-2">
+                                    <ActionBadge metadata={message.metadata} />
+                                </div>
+                            )}
+
                             <p className="text-sm leading-relaxed whitespace-pre-wrap">
                                 {message.content}
                             </p>
@@ -104,22 +187,23 @@ export const MessageList: FC<MessageListProps> = ({
                 </div>
             ))}
 
-            {/* Loading indicator */}
+            {/* Smart Loading indicator */}
             {isQuerying && (
                 <div className="flex gap-4">
-                    <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg flex items-center justify-center shrink-0">
-                        {chatMode === "research" ? (
-                            <Brain className="w-4 h-4 text-white" />
-                        ) : (
-                            <BookOpen className="w-4 h-4 text-white" />
-                        )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <Loader2 className="w-4 h-4 text-purple-500 animate-spin" />
-                        <span className="text-sm text-gray-500">
-                            {chatMode === "research" ? "Researching..." : "Searching knowledge base..."}
-                        </span>
-                    </div>
+                    {(() => {
+                        const loadingInfo = getLoadingInfo(processingStatus);
+                        return (
+                            <>
+                                <div className={`w-8 h-8 bg-gradient-to-br ${loadingInfo.color} rounded-lg flex items-center justify-center shrink-0`}>
+                                    {loadingInfo.icon}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <Loader2 className="w-4 h-4 text-purple-500 animate-spin" />
+                                    <span className="text-sm text-gray-500">{loadingInfo.text}</span>
+                                </div>
+                            </>
+                        );
+                    })()}
                 </div>
             )}
 
@@ -127,4 +211,3 @@ export const MessageList: FC<MessageListProps> = ({
         </div>
     );
 };
-

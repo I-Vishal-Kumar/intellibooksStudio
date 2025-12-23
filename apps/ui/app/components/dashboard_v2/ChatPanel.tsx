@@ -23,6 +23,12 @@ interface RAGStats {
     status: string;
 }
 
+// Processing status from smart handler
+interface ProcessingStatus {
+    intent: "general_chat" | "knowledge_query" | "hybrid";
+    description: string;
+}
+
 interface ChatPanelProps {
     hasSources: boolean;
     onUploadClick?: () => void;
@@ -34,8 +40,6 @@ interface ChatPanelProps {
     useWebSocket?: boolean;
     sessionId?: string;
 }
-
-type ChatMode = "chat" | "research";
 
 // Internal component that uses WebSocket context
 const ChatPanelInternal: FC<ChatPanelProps & { wsContext?: ReturnType<typeof useWebSocketContext> | null }> = ({
@@ -49,7 +53,6 @@ const ChatPanelInternal: FC<ChatPanelProps & { wsContext?: ReturnType<typeof use
     wsContext = null,
 }) => {
     const [input, setInput] = useState("");
-    const [chatMode, setChatMode] = useState<ChatMode>("chat");
     const [isTranscribing, setIsTranscribing] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -58,9 +61,11 @@ const ChatPanelInternal: FC<ChatPanelProps & { wsContext?: ReturnType<typeof use
     const shouldUseWebSocket = useWebSocket && wsContext !== null;
     const wsMessages = shouldUseWebSocket && wsContext ? wsContext.messages : [];
     const wsIsConnected = shouldUseWebSocket && wsContext ? wsContext.isConnected : false;
+    const wsProcessingStatus = shouldUseWebSocket && wsContext ? wsContext.processingStatus : null;
     const wsIsQuerying =
         shouldUseWebSocket && wsContext
             ? wsContext.status === "connecting" ||
+              wsProcessingStatus !== null ||
               (wsMessages.length > 0 &&
                   wsMessages[wsMessages.length - 1]?.role === "user" &&
                   !wsMessages.some(
@@ -163,17 +168,9 @@ const ChatPanelInternal: FC<ChatPanelProps & { wsContext?: ReturnType<typeof use
 
         if (shouldUseWebSocket && wsContext) {
             const sessionId = wsContext.sessionId || undefined;
-            if (chatMode === "research") {
-                if (sessionId) {
-                    wsContext.sendResearchMessage(trimmedInput, sessionId, {
-                        top_k: 5,
-                        use_rag: true,
-                    });
-                }
-            } else {
-                if (sessionId) {
-                    wsContext.sendMessage(trimmedInput, sessionId);
-                }
+            // Use unified sendMessage - smart handler auto-detects intent
+            if (sessionId) {
+                wsContext.sendMessage(trimmedInput, sessionId);
             }
         } else if (onSendMessage) {
             onSendMessage(trimmedInput);
@@ -191,10 +188,7 @@ const ChatPanelInternal: FC<ChatPanelProps & { wsContext?: ReturnType<typeof use
         <div className="flex-1 bg-white border border-gray-200 rounded-2xl flex flex-col transition-all duration-300 shadow-sm overflow-hidden">
             <ChatHeader
                 stats={stats}
-                chatMode={chatMode}
-                onModeChange={setChatMode}
                 isConnected={wsIsConnected}
-                showModeToggle={shouldUseWebSocket && wsContext !== null}
             />
 
             {/* Chat Content */}
@@ -203,14 +197,13 @@ const ChatPanelInternal: FC<ChatPanelProps & { wsContext?: ReturnType<typeof use
                     <EmptyState
                         hasSources={hasSources}
                         isUploading={isUploading || false}
-                        chatMode={chatMode}
                         onQueryClick={handleQueryClick}
                     />
                 ) : (
                     <MessageList
                         messages={messages}
                         isQuerying={isQuerying}
-                        chatMode={chatMode}
+                        processingStatus={wsProcessingStatus}
                         messagesEndRef={messagesEndRef}
                     />
                 )}
@@ -221,7 +214,6 @@ const ChatPanelInternal: FC<ChatPanelProps & { wsContext?: ReturnType<typeof use
                 setInput={setInput}
                 onSend={handleSend}
                 inputRef={inputRef}
-                chatMode={chatMode}
                 hasSources={hasSources}
                 isUploading={isUploading || false}
                 isQuerying={isQuerying}

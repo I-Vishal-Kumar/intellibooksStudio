@@ -1,7 +1,7 @@
 export type WebSocketStatus = "connecting" | "connected" | "disconnected" | "error";
 
 export interface WebSocketMessage {
-  type: "message" | "research" | "error" | "system";
+  type: "message" | "research" | "error" | "system" | "status";
   content?: string;
   role?: "user" | "assistant" | "system";
   session_id?: string;
@@ -16,6 +16,10 @@ export interface WebSocketMessage {
     filters?: Record<string, unknown>;
     use_rag?: boolean;
   };
+  // Status message fields (from smart handler)
+  status?: string;
+  intent?: string;
+  description?: string;
 }
 
 export interface WebSocketConfig {

@@ -88,20 +88,18 @@ def get_rag_engine():
             collection_name = rag_settings.chroma_collection  # Use same collection as RAG service
             
             logger.info(f"Initializing RAG engine with collection: {collection_name}")
-            
+
             # Initialize vector store with the same collection name as RAG service
-            # Use the same persist directory logic as RAG pipeline
-            persist_dir = os.getenv("CHROMA_PERSIST_DIRECTORY")
-            if not persist_dir:
-                persist_dir = str(Path(__file__).parent.parent.parent.parent.parent / "data" / "chroma_db")
-            
+            # ChromaVectorStore now uses dual-mode (HTTP first, fallback to persistent)
+            # This ensures research agent uses the SAME ChromaDB as RAG service
             vector_store = ChromaVectorStore(
                 collection_name=collection_name,
                 embedding_model=rag_settings.embedding_model,
-                persist_directory=persist_dir,
             )
-            
-            logger.info(f"Vector store initialized: collection={collection_name}, persist_dir={persist_dir}")
+
+            # Log connection info
+            conn_info = vector_store.get_connection_info()
+            logger.info(f"Vector store initialized: {conn_info}")
             
             # Check collection count for debugging
             try:

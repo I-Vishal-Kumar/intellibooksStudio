@@ -1,17 +1,15 @@
 import { FC } from "react";
-import { Search, BookOpen, Brain, Sparkles, FileText } from "lucide-react";
+import { Search, Sparkles, FileText, Database, MessageCircle } from "lucide-react";
 
 interface EmptyStateProps {
     hasSources: boolean;
     isUploading: boolean;
-    chatMode: "chat" | "research";
     onQueryClick: (query: string) => void;
 }
 
 export const EmptyState: FC<EmptyStateProps> = ({
     hasSources,
     isUploading,
-    chatMode,
     onQueryClick,
 }) => {
     if (isUploading) {
@@ -32,7 +30,7 @@ export const EmptyState: FC<EmptyStateProps> = ({
         );
     }
 
-    if (!hasSources && chatMode === "chat") {
+    if (!hasSources) {
         return (
             <div className="h-full flex flex-col items-center justify-center p-8 text-center space-y-4">
                 <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center">
@@ -41,44 +39,46 @@ export const EmptyState: FC<EmptyStateProps> = ({
                 <div className="space-y-2">
                     <h3 className="text-lg font-medium text-gray-700">Start a conversation</h3>
                     <p className="text-sm text-gray-400 max-w-sm">
-                        Upload documents using the sidebar to begin querying your knowledge base.
+                        Upload documents using the sidebar, or just start chatting. I'll automatically search your knowledge base when needed.
                     </p>
                 </div>
             </div>
         );
     }
 
-    const suggestedQueries = chatMode === "research" 
-        ? [
-            { icon: <Brain className="w-5 h-5" />, text: "what things should an agent identity card contain?" },
-            { icon: <Search className="w-5 h-5" />, text: "analyze the architecture patterns" },
-            { icon: <FileText className="w-5 h-5" />, text: "find best practices" },
-            { icon: <Sparkles className="w-5 h-5" />, text: "provide comprehensive analysis" },
-        ]
-        : [
-            { icon: <Search className="w-5 h-5" />, text: "What are the main topics in my documents?" },
-            { icon: <BookOpen className="w-5 h-5" />, text: "Summarize the key points" },
-            { icon: <FileText className="w-5 h-5" />, text: "Find information about..." },
-            { icon: <Sparkles className="w-5 h-5" />, text: "What insights can you provide?" },
-        ];
+    // Suggested queries for smart chat
+    const suggestedQueries = [
+        { icon: <Search className="w-5 h-5" />, text: "What are the main topics in my documents?" },
+        { icon: <Database className="w-5 h-5" />, text: "Find information about..." },
+        { icon: <FileText className="w-5 h-5" />, text: "Summarize the key points" },
+        { icon: <Sparkles className="w-5 h-5" />, text: "What insights can you provide?" },
+    ];
 
     return (
         <div className="h-full flex flex-col items-center justify-center p-8 text-center">
             <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-purple-500/20">
-                {chatMode === "research" ? (
-                    <Brain size={32} className="text-white" />
-                ) : (
-                    <BookOpen size={32} className="text-white" />
-                )}
+                <Sparkles size={32} className="text-white" />
             </div>
             <h3 className="text-xl font-semibold text-gray-900 mb-2">
-                {chatMode === "research" ? "Ready for research" : "Ready to answer your questions"}
+                Smart Chat Ready
             </h3>
-            <p className="text-gray-500 mb-6 max-w-md">
-                {chatMode === "research"
-                    ? "Ask research questions and I'll provide comprehensive, well-cited answers using the knowledge base."
-                    : "Your documents are indexed. Ask anything about the content."}
+            <p className="text-gray-500 mb-2 max-w-md">
+                Ask anything! I'll automatically determine whether to chat directly or search your knowledge base.
             </p>
+            <div className="flex items-center gap-4 text-xs text-gray-400 mb-6">
+                <div className="flex items-center gap-1">
+                    <MessageCircle className="w-3 h-3" />
+                    <span>General Chat</span>
+                </div>
+                <div className="flex items-center gap-1">
+                    <Database className="w-3 h-3" />
+                    <span>Knowledge Search</span>
+                </div>
+                <div className="flex items-center gap-1">
+                    <Sparkles className="w-3 h-3" />
+                    <span>Smart Hybrid</span>
+                </div>
+            </div>
 
             {/* Suggested Queries */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl">
@@ -98,4 +98,3 @@ export const EmptyState: FC<EmptyStateProps> = ({
         </div>
     );
 };
-
