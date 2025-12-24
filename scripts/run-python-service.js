@@ -62,15 +62,53 @@ const modulePath = serviceMap[serviceName];
 const additionalArgs = process.argv.slice(3);
 
 // Build uvicorn command
+// Use --reload-dir to only watch the specific service directory instead of entire workspace
+// This avoids inotify limit issues
+const serviceDirMap = {
+  'websocket': 'services/websocket',
+  'agents': 'services/agents',
+  'rag': 'services/rag',
+};
+
+const serviceDir = serviceDirMap[serviceName] || 'services';
+
+// Services that should skip hot reload (to avoid issues)
+const skipReloadServices = ['rag', 'websocket'];
+
+// Build uvicorn command arguments
 const args = [
   '-m',
   'uvicorn',
   modulePath,
-  '--reload',
+  '--host',
+  '0.0.0.0',
   '--port',
   port.toString(),
-  ...additionalArgs,
 ];
+
+// Add reload options only if not in skip list
+if (!skipReloadServices.includes(serviceName)) {
+  // Build reload directories - watch the service directory and shared packages
+  // Use relative paths from workspace root (where the script runs from)
+  const reloadDirs = [
+    '--reload-dir', serviceDir,
+    '--reload-dir', 'packages/agent-framework',
+    '--reload-dir', 'packages/core',
+  ];
+
+  // Also exclude common non-Python directories as backup
+  const excludePatterns = [
+    '--reload-exclude', '**/node_modules/**',
+    '--reload-exclude', '**/__pycache__/**',
+    '--reload-exclude', '**/*.pyc',
+    '--reload-exclude', '**/*.pyo',
+  ];
+
+  args.push('--reload', ...reloadDirs, ...excludePatterns);
+}
+
+// Add any additional arguments
+args.push(...additionalArgs);
 
 /**
  * Find the correct Python executable
@@ -94,7 +132,7 @@ function findPythonCommand() {
 const pythonCmd = findPythonCommand();
 
 /**
- * Check if a port is in use and return the PID if found
+ * Check if a port is actually listening (not just open by a process)
  */
 function checkPortInUse(port) {
   try {
@@ -106,21 +144,50 @@ function checkPortInUse(port) {
         const lines = result.trim().split('\n');
         for (const line of lines) {
           const parts = line.trim().split(/\s+/);
-          if (parts.length > 0 && parts[parts.length - 1] !== '0') {
+          // Check if it's LISTENING state
+          if (parts.length > 1 && parts[1] === 'LISTENING') {
             const pid = parts[parts.length - 1];
-            if (pid && !isNaN(pid)) {
+            if (pid && !isNaN(pid) && pid !== '0') {
               return parseInt(pid);
             }
           }
         }
       }
     } else {
-      // Linux/macOS: lsof -ti:PORT
-      const result = execSync(`lsof -ti:${port}`, { encoding: 'utf8' });
-      if (result.trim()) {
-        const pid = parseInt(result.trim().split('\n')[0]);
-        if (!isNaN(pid)) {
-          return pid;
+      // Linux/macOS: Check if port is actually listening
+      // Use ss or netstat to check for LISTEN state
+      try {
+        // Try ss first (more modern)
+        const ssResult = execSync(`ss -tlnp 2>/dev/null | grep :${port} | grep LISTEN`, { encoding: 'utf8' });
+        if (ssResult.trim()) {
+          // Extract PID from ss output
+          const match = ssResult.match(/pid=(\d+)/);
+          if (match && match[1]) {
+            return parseInt(match[1]);
+          }
+        }
+      } catch (e) {
+        // Fall back to netstat
+        try {
+          const netstatResult = execSync(`netstat -tlnp 2>/dev/null | grep :${port} | grep LISTEN`, { encoding: 'utf8' });
+          if (netstatResult.trim()) {
+            // Extract PID from netstat output (last column before program name)
+            const parts = netstatResult.trim().split(/\s+/);
+            const pidPart = parts[parts.length - 1];
+            const pidMatch = pidPart.match(/(\d+)\//);
+            if (pidMatch && pidMatch[1]) {
+              return parseInt(pidMatch[1]);
+            }
+          }
+        } catch (e2) {
+          // If both fail, try lsof as last resort but be more careful
+          const lsofResult = execSync(`lsof -ti:${port} -sTCP:LISTEN 2>/dev/null`, { encoding: 'utf8' });
+          if (lsofResult.trim()) {
+            const pid = parseInt(lsofResult.trim().split('\n')[0]);
+            if (!isNaN(pid)) {
+              return pid;
+            }
+          }
         }
       }
     }
@@ -198,21 +265,15 @@ async function main() {
       }
 
       console.log(`   Process: ${processName} (PID: ${existingPid})`);
-      const answer = await askQuestion(`\n❓ Kill this process and start ${serviceName} service? (y/n): `);
-
-      if (answer === 'y' || answer === 'yes') {
-        console.log(`\n🛑 Killing process ${existingPid}...`);
-        if (killProcess(existingPid)) {
-          console.log(`✅ Process killed successfully`);
-          // Wait a moment for port to be released
-          await new Promise(resolve => setTimeout(resolve, 500));
-        } else {
-          console.error(`❌ Failed to kill process ${existingPid}`);
-          console.error(`   Please kill it manually and try again`);
-          process.exit(1);
-        }
+      console.log(`\n🛑 Auto-killing process ${existingPid} to free port ${port}...`);
+      
+      if (killProcess(existingPid)) {
+        console.log(`✅ Process killed successfully`);
+        // Wait a moment for port to be released
+        await new Promise(resolve => setTimeout(resolve, 1000));
       } else {
-        console.log(`\n❌ Aborted. Please free port ${port} and try again.`);
+        console.error(`❌ Failed to kill process ${existingPid}`);
+        console.error(`   Please kill it manually and try again`);
         process.exit(1);
       }
     } catch (error) {
@@ -249,11 +310,13 @@ async function main() {
   }
 
   // Spawn Python process
+  // Use 'inherit' for stdio so output goes directly to terminal
   const pythonProcess = spawn(pythonCmd, args, {
     stdio: 'inherit',
     shell: false,
     env: env,
     cwd: workspaceRoot, // Set working directory to workspace root
+    detached: false, // Keep attached to parent process
   });
 
   pythonProcess.on('error', (error) => {
