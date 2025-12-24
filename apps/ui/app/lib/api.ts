@@ -115,6 +115,98 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
   }
 }
 
+/**
+ * Helper to get HTTP URL from WebSocket URL
+ */
+const getHttpUrl = () => {
+  const wsUrl = process.env.NEXT_PUBLIC_WEBSOCKET_URL || "ws://localhost:8400";
+  // Convert ws:// to http:// and wss:// to https://
+  if (wsUrl.startsWith("ws://")) {
+    const url = wsUrl.replace("ws://", "http://");
+    if (url.includes(":8400")) {
+      return url.replace(":8400", ":8004");
+    }
+    return url;
+  } else if (wsUrl.startsWith("wss://")) {
+    const url = wsUrl.replace("wss://", "https://");
+    if (url.includes(":8400")) {
+      return url.replace(":8400", ":8004");
+    }
+    return url;
+  } else if (wsUrl.startsWith("http://") || wsUrl.startsWith("https://")) {
+    return wsUrl;
+  }
+  return "http://localhost:8004";
+};
+
+/**
+ * Database Configuration API
+ */
+export interface DatabaseConfig {
+  db_type: string;
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password: string;
+  schema?: string;
+  ssl_mode?: string;
+  pool_size: number;
+  max_overflow: number;
+}
+
+export interface DatabaseConfigResponse {
+  success: boolean;
+  session_id?: string;
+  message?: string;
+  configured?: boolean;
+  config?: DatabaseConfig;
+}
+
+/**
+ * Get database configuration for a session
+ */
+export const getDatabaseConfig = async (
+  sessionId: string
+): Promise<DatabaseConfigResponse> => {
+  const httpUrl = getHttpUrl();
+  const response = await axios.get(
+    `${httpUrl}/api/sessions/${sessionId}/database/config`
+  );
+  return response.data;
+};
+
+/**
+ * Save and test database configuration for a session
+ */
+export const saveDatabaseConfig = async (
+  sessionId: string,
+  config: DatabaseConfig
+): Promise<DatabaseConfigResponse> => {
+  const httpUrl = getHttpUrl();
+  const response = await axios.post(
+    `${httpUrl}/api/sessions/${sessionId}/database/config`,
+    config,
+    {
+      timeout: 30000,
+    }
+  );
+  return response.data;
+};
+
+/**
+ * Delete database configuration for a session
+ */
+export const deleteDatabaseConfig = async (
+  sessionId: string
+): Promise<DatabaseConfigResponse> => {
+  const httpUrl = getHttpUrl();
+  const response = await axios.delete(
+    `${httpUrl}/api/sessions/${sessionId}/database/config`
+  );
+  return response.data;
+};
+
 // Export default instance
 export default apiClient;
 

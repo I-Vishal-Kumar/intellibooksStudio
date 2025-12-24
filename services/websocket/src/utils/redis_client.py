@@ -51,6 +51,7 @@ SESSION_PREFIX = "meeting:session:"
 CHUNK_QUEUE_PREFIX = "meeting:chunks:"
 PROCESSING_STATE_PREFIX = "meeting:processing:"
 METADATA_PREFIX = "meeting:metadata:"
+DB_CONFIG_PREFIX = "analytics:db_config:"
 
 
 async def save_session(session_id: str, session_data: Dict[str, Any]) -> None:
@@ -134,4 +135,44 @@ async def get_metadata(session_id: str) -> Optional[Dict[str, Any]]:
     if data:
         return json.loads(data)
     return None
+
+
+# Database configuration storage for analytics agent
+async def save_db_config(session_id: str, db_config: Dict[str, Any]) -> None:
+    """Save database configuration for a session."""
+    try:
+        redis = await get_redis_client()
+        key = f"{DB_CONFIG_PREFIX}{session_id}"
+        # Store with 30 days TTL
+        await redis.setex(key, 86400 * 30, json.dumps(db_config))
+        logger.info(f"Saved database config for session {session_id}")
+    except Exception as e:
+        logger.error(f"Failed to save database config: {e}")
+        raise
+
+
+async def get_db_config(session_id: str) -> Optional[Dict[str, Any]]:
+    """Get database configuration for a session."""
+    try:
+        redis = await get_redis_client()
+        key = f"{DB_CONFIG_PREFIX}{session_id}"
+        data = await redis.get(key)
+        if data:
+            return json.loads(data)
+        return None
+    except Exception as e:
+        logger.error(f"Failed to get database config: {e}")
+        return None
+
+
+async def delete_db_config(session_id: str) -> None:
+    """Delete database configuration for a session."""
+    try:
+        redis = await get_redis_client()
+        key = f"{DB_CONFIG_PREFIX}{session_id}"
+        await redis.delete(key)
+        logger.info(f"Deleted database config for session {session_id}")
+    except Exception as e:
+        logger.error(f"Failed to delete database config: {e}")
+        raise
 

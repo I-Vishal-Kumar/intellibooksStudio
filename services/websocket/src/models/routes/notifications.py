@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, UUID4
 
-from ..models.db import get_db, Notification
+from ...models.db import get_db, Notification
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 

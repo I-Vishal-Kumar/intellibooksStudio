@@ -8,9 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException, Body, Header
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, UUID4, Field
 
-from ..models.db import get_db, Conversation, Message, init_db
-from ..utils.permissions import get_user_role
-from ..utils.clerk import get_user_id_by_email
+from ...models.db import get_db, Conversation, Message, init_db
+from ...utils.permissions import get_user_role
+from ...utils.clerk import get_user_id_by_email
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 print("DEBUG: Conversations router initialized")
@@ -180,7 +180,7 @@ async def add_collaborator(
     if not target_user_id:
         raise HTTPException(status_code=400, detail="Either user_id or email must be provided")
 
-    from ..models.db import ConversationPermission
+    from ...models.db import ConversationPermission
     
     # Check if exists
     existing = db.query(ConversationPermission).filter(
@@ -213,7 +213,7 @@ async def add_collaborator(
 def create_invite_notification(db: Session, user_id: str, conversation_id: UUID4, role: str):
     """Helper to create an invite notification."""
     print(f"DEBUG: Creating invite notification for user_id={user_id}, conv={conversation_id}")
-    from ..models.db import Notification, Conversation
+    from ...models.db import Notification, Conversation
     conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
     title = f"New Chat Invite: {conv.title if conv and conv.title else 'Untitled'}"
     content = f"You have been invited to collaborate as an {role}."
@@ -242,7 +242,7 @@ async def list_collaborators(
     if not role:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    from ..models.db import ConversationPermission
+    from ...models.db import ConversationPermission
     return db.query(ConversationPermission).filter(
         ConversationPermission.conversation_id == conversation_id
     ).all()
@@ -261,7 +261,7 @@ async def remove_collaborator(
     if role != "owner":
         raise HTTPException(status_code=403, detail="Only owners can manage collaborators")
 
-    from ..models.db import ConversationPermission
+    from ...models.db import ConversationPermission
     perm = db.query(ConversationPermission).filter(
         ConversationPermission.conversation_id == conversation_id,
         ConversationPermission.user_id == user_id
