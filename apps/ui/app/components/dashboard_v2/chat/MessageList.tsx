@@ -1,5 +1,5 @@
-import { FC, RefObject, useEffect } from "react";
-import { PlusSquare, Copy, ThumbsUp, ThumbsDown, Clock, Loader2, Sparkles, Database, MessageCircle } from "lucide-react";
+import { FC, RefObject, useEffect, useState } from "react";
+import { PlusSquare, Copy, ThumbsUp, ThumbsDown, Clock, Loader2, Sparkles, Database, MessageCircle, Code, Table2, ChevronDown, ChevronUp } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -37,7 +37,9 @@ const getMessageIcon = (metadata?: Record<string, unknown>) => {
     const intent = metadata?.detected_intent as string;
     const ragUsed = metadata?.rag_used as boolean;
 
-    if (ragUsed || intent === "knowledge_query") {
+    if (intent === "analytics_query") {
+        return <Table2 className="w-4 h-4 text-white" />;
+    } else if (ragUsed || intent === "knowledge_query") {
         return <Database className="w-4 h-4 text-white" />;
     } else if (intent === "hybrid") {
         return <Sparkles className="w-4 h-4 text-white" />;
@@ -57,6 +59,12 @@ const getLoadingInfo = (processingStatus?: ProcessingStatus | null) => {
     }
 
     switch (processingStatus.intent) {
+        case "analytics_query":
+            return {
+                icon: <Table2 className="w-4 h-4 text-white" />,
+                text: processingStatus.description || "Querying database...",
+                color: "from-green-500 to-green-600",
+            };
         case "knowledge_query":
             return {
                 icon: <Database className="w-4 h-4 text-white" />,
@@ -84,10 +92,18 @@ const ActionBadge: FC<{ metadata?: Record<string, unknown> }> = ({ metadata }) =
     const intent = metadata?.detected_intent as string;
     const ragUsed = metadata?.rag_used as boolean;
     const sourcesCount = metadata?.sources_count as number;
+    const rowCount = metadata?.row_count as number;
 
     if (!intent && !ragUsed) return null;
 
-    if (ragUsed || intent === "knowledge_query") {
+    if (intent === "analytics_query") {
+        return (
+            <div className="flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full max-w-fit">
+                <Table2 className="w-3 h-3" />
+                <span>Analytics{rowCount !== undefined ? ` (${rowCount} rows)` : ""}</span>
+            </div>
+        );
+    } else if (ragUsed || intent === "knowledge_query") {
         return (
             <div className="flex items-center gap-1 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full max-w-fit">
                 <Database className="w-3 h-3" />
@@ -104,6 +120,89 @@ const ActionBadge: FC<{ metadata?: Record<string, unknown> }> = ({ metadata }) =
     }
 
     return null;
+};
+
+// SQL Query Display Component
+const SQLQueryDisplay: FC<{ sql: string }> = ({ sql }) => {
+    const [isExpanded, setIsExpanded] = useState(false);
+
+    if (!sql) return null;
+
+    return (
+        <div className="mt-3 pt-3 border-t border-gray-200">
+            <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="flex items-center gap-2 text-xs font-medium text-gray-600 hover:text-gray-900 mb-2"
+            >
+                <Code className="w-3 h-3" />
+                <span>SQL Query</span>
+                {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+            {isExpanded && (
+                <pre className="bg-gray-900 text-gray-100 rounded-lg p-4 overflow-x-auto text-xs font-mono">
+                    <code>{sql}</code>
+                </pre>
+            )}
+        </div>
+    );
+};
+
+// Query Results Display Component
+const QueryResultsDisplay: FC<{ results: any }> = ({ results }) => {
+    const [isExpanded, setIsExpanded] = useState(false);
+
+    if (!results || !results.rows || results.rows.length === 0) return null;
+
+    const columns = results.columns || [];
+    const rows = results.rows || [];
+    const rowCount = results.row_count || rows.length;
+    const executionTime = results.execution_time_ms;
+
+    return (
+        <div className="mt-3 pt-3 border-t border-gray-200">
+            <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="flex items-center gap-2 text-xs font-medium text-gray-600 hover:text-gray-900 mb-2"
+            >
+                <Table2 className="w-3 h-3" />
+                <span>Query Results ({rowCount} rows{executionTime ? `, ${executionTime.toFixed(0)}ms` : ""})</span>
+                {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+            {isExpanded && (
+                <div className="overflow-x-auto">
+                    <table className="min-w-full text-xs border border-gray-200 rounded-lg">
+                        <thead className="bg-gray-50">
+                            <tr>
+                                {columns.map((col: string, i: number) => (
+                                    <th key={i} className="px-3 py-2 text-left font-semibold text-gray-700 border-b border-gray-200">
+                                        {col}
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                            {rows.slice(0, 100).map((row: any, i: number) => (
+                                <tr key={i} className="hover:bg-gray-50">
+                                    {columns.map((col: string, j: number) => (
+                                        <td key={j} className="px-3 py-2 text-gray-700 border-b border-gray-100">
+                                            {row[col] !== null && row[col] !== undefined
+                                                ? String(row[col])
+                                                : <span className="text-gray-400">null</span>}
+                                        </td>
+                                    ))}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                    {rows.length > 100 && (
+                        <p className="text-xs text-gray-500 mt-2">
+                            Showing first 100 of {rows.length} rows
+                        </p>
+                    )}
+                </div>
+            )}
+        </div>
+    );
 };
 
 export const MessageList: FC<MessageListProps> = ({
@@ -215,6 +314,16 @@ export const MessageList: FC<MessageListProps> = ({
                                 </ReactMarkdown>
                             </div>
 
+                            {/* SQL Query (for analytics) */}
+                            {message.metadata?.sql && (
+                                <SQLQueryDisplay sql={message.metadata.sql as string} />
+                            )}
+
+                            {/* Query Results (for analytics) */}
+                            {message.metadata?.results && (
+                                <QueryResultsDisplay results={message.metadata.results} />
+                            )}
+
                             {/* Sources */}
                             {message.sources && Array.isArray(message.sources) && message.sources.length > 0 && (
                                 <div className="mt-3 pt-3 border-t border-gray-200">
@@ -270,7 +379,7 @@ export const MessageList: FC<MessageListProps> = ({
                         const loadingInfo = getLoadingInfo(processingStatus);
                         return (
                             <>
-                                <div className={`w-8 h-8 bg-linear-to-br ${loadingInfo.color} rounded-lg flex items-center justify-center`}>
+                                <div className={`w-8 h-8 bg-gradient-to-br ${loadingInfo.color} rounded-lg flex items-center justify-center`}>
                                     {loadingInfo.icon}
                                 </div>
                                 <div className="flex items-center gap-2">

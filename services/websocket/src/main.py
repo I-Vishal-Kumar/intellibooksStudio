@@ -18,7 +18,7 @@ from .handlers.chat_handler import handle_chat_message
 from .utils.permissions import get_user_role
 from .models.db import SessionLocal
 from .models.messages import ChatResponse, SystemMessage, ErrorMessage
-from .routes import transcription, meetings, conversations, notifications
+from .models.routes import transcription, meetings, conversations, notifications
 
 # Configure logging
 logging.basicConfig(
@@ -53,6 +53,20 @@ class CreateSessionRequest(BaseModel):
 
 class UpdateSessionRequest(BaseModel):
     title: str
+
+
+class DatabaseConfigRequest(BaseModel):
+    db_type: str
+    host: str
+    port: int
+    database: str
+    user: str
+    password: str
+    schema: Optional[str] = None
+    ssl_mode: Optional[str] = None
+    pool_size: int = 10
+    max_overflow: int = 20
+    extra_params: Optional[dict] = None
 
 
 async def init_database():
@@ -336,6 +350,112 @@ async def get_session_messages(session_id: str, limit: int = 100, offset: int = 
         ],
         "total": len(messages),
     }
+
+
+# Database configuration endpoints for analytics agent
+@app.post("/api/sessions/{session_id}/database/config")
+async def configure_database(session_id: str, request: DatabaseConfigRequest):
+    """Configure database connection for analytics agent in a session."""
+    try:
+        # Validate database type
+        valid_types = ["postgresql", "snowflake", "mysql", "sqlite"]
+        if request.db_type.lower() not in valid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid database type. Must be one of: {', '.join(valid_types)}"
+            )
+        
+        config_dict = {
+            "db_type": request.db_type.lower(),
+            "host": request.host,
+            "port": request.port,
+            "database": request.database,
+            "user": request.user,
+            "password": request.password,
+            "schema": request.schema,
+            "ssl_mode": request.ssl_mode,
+            "pool_size": request.pool_size,
+            "max_overflow": request.max_overflow,
+            "extra_params": request.extra_params,
+        }
+        
+        # Test connection by creating a temporary agent instance
+        try:
+            from services.agents.src.agents.analytics_agent import AnalyticsAgent
+            test_agent = AnalyticsAgent(db_config=config_dict, session_id=session_id)
+            # Connection is tested during agent initialization
+            
+            # Store configuration in Redis
+            try:
+                from .utils.redis_client import save_db_config
+                await save_db_config(session_id, config_dict)
+            except Exception as e:
+                logger.warning(f"Failed to save database config to Redis: {e}. Configuration will not persist.")
+            
+            return {
+                "success": True,
+                "session_id": session_id,
+                "message": "Database configuration saved and connection verified",
+                "config": {**config_dict, "password": "***"}  # Don't return password
+            }
+        except Exception as e:
+            logger.error(f"Failed to test database connection: {e}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to connect to database: {str(e)}"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error configuring database: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/sessions/{session_id}/database/config")
+async def get_database_config(session_id: str):
+    """Get database configuration for a session."""
+    try:
+        from .utils.redis_client import get_db_config
+        config = await get_db_config(session_id)
+        
+        if config:
+            return {
+                "success": True,
+                "session_id": session_id,
+                "configured": True,
+                "config": {**config, "password": "***"}  # Don't return password
+            }
+        else:
+            return {
+                "success": False,
+                "session_id": session_id,
+                "configured": False,
+                "message": "No database configuration found for this session"
+            }
+    except Exception as e:
+        logger.error(f"Error getting database config: {e}")
+        return {
+            "success": False,
+            "session_id": session_id,
+            "configured": False,
+            "message": f"Error retrieving configuration: {str(e)}"
+        }
+
+
+@app.delete("/api/sessions/{session_id}/database/config")
+async def delete_database_config(session_id: str):
+    """Remove database configuration for a session."""
+    try:
+        from .utils.redis_client import delete_db_config
+        await delete_db_config(session_id)
+        return {
+            "success": True,
+            "session_id": session_id,
+            "message": "Database configuration removed"
+        }
+    except Exception as e:
+        logger.error(f"Error deleting database config: {e}")
+        raise HTTPException(status_code=500, detail=f"Error removing configuration: {str(e)}")
 
 
 @app.websocket("/ws/chat/{session_id}")

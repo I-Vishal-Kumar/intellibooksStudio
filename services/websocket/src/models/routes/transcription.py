@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from pydantic import BaseModel
 
-from ..config import get_settings
+from ...config import get_settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/transcription", tags=["transcription"])

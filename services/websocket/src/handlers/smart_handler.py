@@ -54,13 +54,37 @@ except ImportError as e:
     ResearchAgent = None
     RESEARCH_AGENT_AVAILABLE = False
 
+try:
+    from services.agents.src.agents.analytics_agent import AnalyticsAgent
+    ANALYTICS_AGENT_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"AnalyticsAgent not available: {e}")
+    AnalyticsAgent = None
+    ANALYTICS_AGENT_AVAILABLE = False
+
 
 class MessageIntent(Enum):
     """Detected intent for a message."""
     GENERAL_CHAT = "general_chat"
     KNOWLEDGE_QUERY = "knowledge_query"
+    ANALYTICS_QUERY = "analytics_query"
     HYBRID = "hybrid"
 
+
+# Keywords and patterns that suggest analytics/database queries
+ANALYTICS_QUERY_PATTERNS = [
+    # Database-related keywords
+    r"\b(show|display|list|get|fetch|query|select|find)\s+(me\s+)?(all|the|data|records|rows|results)\b",
+    r"\b(count|sum|total|average|avg|max|min|group by|order by)\b",
+    r"\b(table|tables|column|columns|schema|database|db)\b",
+    r"\b(top|bottom|first|last)\s+\d+\b",
+    r"\b(how many|how much|what is the|what are the)\b.*\b(in|from|of)\b",
+    r"\b(revenue|sales|orders|customers|products|users)\b.*\b(by|grouped|per|for)\b",
+    r"\b(analyze|analysis|analytics|report|insight|metric|kpi)\b",
+    r"\b(join|inner join|left join|right join|union)\b",
+    r"\b(where|having|filter|filtered)\b.*\b(and|or)\b",
+    r"\b(aggregate|aggregation|group|pivot)\b",
+]
 
 # Keywords and patterns that suggest knowledge base queries
 KNOWLEDGE_QUERY_PATTERNS = [
@@ -121,6 +145,18 @@ def detect_intent(message: str) -> Tuple[MessageIntent, float]:
         if re.search(pattern, message_lower, re.IGNORECASE):
             return MessageIntent.GENERAL_CHAT, 0.9
 
+    # Check for analytics query patterns
+    analytics_matches = 0
+    for pattern in ANALYTICS_QUERY_PATTERNS:
+        if re.search(pattern, message_lower, re.IGNORECASE):
+            analytics_matches += 1
+
+    # If multiple analytics patterns match, high confidence it's an analytics query
+    if analytics_matches >= 2:
+        return MessageIntent.ANALYTICS_QUERY, 0.95
+    elif analytics_matches == 1:
+        return MessageIntent.ANALYTICS_QUERY, 0.75
+
     # Check for knowledge query patterns
     knowledge_matches = 0
     for pattern in KNOWLEDGE_QUERY_PATTERNS:
@@ -158,6 +194,7 @@ def get_intent_description(intent: MessageIntent) -> str:
     descriptions = {
         MessageIntent.GENERAL_CHAT: "Thinking...",
         MessageIntent.KNOWLEDGE_QUERY: "Searching knowledge base...",
+        MessageIntent.ANALYTICS_QUERY: "Querying database...",
         MessageIntent.HYBRID: "Analyzing query and searching knowledge...",
     }
     return descriptions.get(intent, "Processing...")
@@ -227,6 +264,79 @@ async def process_with_chat_agent(message: ChatMessage) -> ChatResponse:
             message_id=str(uuid4()),
             timestamp=datetime.utcnow(),
             metadata={"intent": "general_chat", "rag_used": False, "error": True},
+        )
+
+
+async def process_with_analytics_agent(message: ChatMessage, db_config: Optional[Dict[str, Any]] = None) -> ChatResponse:
+    """Process message with analytics agent (database queries)."""
+    if not ANALYTICS_AGENT_AVAILABLE or AnalyticsAgent is None:
+        return ChatResponse(
+            type="message",
+            content="I'd like to query the database for you, but the analytics service is currently initializing. Please try again in a moment.",
+            role="assistant",
+            session_id=message.session_id,
+            message_id=str(uuid4()),
+            timestamp=datetime.utcnow(),
+            metadata={"intent": "analytics_query", "error": "agent_not_available"},
+        )
+
+    try:
+        # Create analytics agent with optional database config
+        analytics_agent = AnalyticsAgent(
+            db_config=db_config,
+            session_id=message.session_id,
+            enable_memory=True,
+        )
+        
+        agent_result = await analytics_agent.safe_execute({
+            "query": message.content,
+            "question": message.content,
+            "message": message.content,
+            "text": message.content,
+        })
+
+        if agent_result.success and agent_result.data:
+            response_data = agent_result.data
+            response_content = response_data.get("response", response_data.get("answer", "I couldn't generate a query."))
+            sql_query = response_data.get("sql")
+            query_results = response_data.get("results")
+
+            return ChatResponse(
+                type="message",
+                content=response_content,
+                role="assistant",
+                session_id=message.session_id,
+                message_id=str(uuid4()),
+                timestamp=datetime.utcnow(),
+                metadata={
+                    "intent": "analytics_query",
+                    "sql": sql_query,
+                    "results": query_results,
+                    "row_count": query_results.get("row_count", 0) if query_results else 0,
+                    "agent_id": agent_result.metadata.get("agent_id", "analytics-agent") if agent_result.metadata else "analytics-agent",
+                },
+            )
+        else:
+            error_msg = agent_result.error or "Failed to process analytics query"
+            return ChatResponse(
+                type="error",
+                content=f"I encountered an issue querying the database: {error_msg}. Please ensure the database is configured.",
+                role="assistant",
+                session_id=message.session_id,
+                message_id=str(uuid4()),
+                timestamp=datetime.utcnow(),
+                metadata={"intent": "analytics_query", "error": True},
+            )
+    except Exception as e:
+        logger.exception(f"Error processing analytics query: {e}")
+        return ChatResponse(
+            type="error",
+            content=f"I encountered an error processing your analytics query: {str(e)}. Please check your database configuration.",
+            role="assistant",
+            session_id=message.session_id,
+            message_id=str(uuid4()),
+            timestamp=datetime.utcnow(),
+            metadata={"intent": "analytics_query", "error": True},
         )
 
 
@@ -304,6 +414,18 @@ async def process_smart_message(
     try:
         if intent == MessageIntent.GENERAL_CHAT:
             response = await process_with_chat_agent(message)
+        elif intent == MessageIntent.ANALYTICS_QUERY:
+            # Get database config from Redis storage
+            db_config = None
+            try:
+                from ..utils.redis_client import get_db_config
+                db_config = await get_db_config(message.session_id)
+                if not db_config:
+                    logger.warning(f"No database configuration found for session {message.session_id}")
+            except Exception as e:
+                logger.warning(f"Failed to retrieve database config: {e}")
+            
+            response = await process_with_analytics_agent(message, db_config)
         elif intent == MessageIntent.KNOWLEDGE_QUERY:
             response = await process_with_research_agent(message)
         else:  # HYBRID

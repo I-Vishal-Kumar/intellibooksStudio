@@ -3,6 +3,7 @@ import { useWebSocketContext } from "@/lib/websocket";
 import { useAudioRecorder } from "@/lib/useAudioRecorder";
 import { transcribeAudio } from "@/lib/api";
 import { ChatHeader, EmptyState, MessageList, MessageInput } from "./chat";
+import DatabaseConfigModal from "./DatabaseConfigModal";
 
 interface Message {
     id: string;
@@ -49,9 +50,11 @@ const ChatPanelInternal: FC<ChatPanelProps & { wsContext?: ReturnType<typeof use
     useWebSocket = true,
     wsContext = null,
     readOnly = false,
+    sessionId,
 }) => {
     const [input, setInput] = useState("");
     const [isTranscribing, setIsTranscribing] = useState(false);
+    const [isDatabaseConfigOpen, setIsDatabaseConfigOpen] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -60,6 +63,8 @@ const ChatPanelInternal: FC<ChatPanelProps & { wsContext?: ReturnType<typeof use
     const wsMessages = shouldUseWebSocket && wsContext ? wsContext.messages : [];
     const wsIsConnected = shouldUseWebSocket && wsContext ? wsContext.isConnected : false;
     const wsProcessingStatus = shouldUseWebSocket && wsContext ? wsContext.processingStatus : null;
+    // Use WebSocket sessionId if available, otherwise fall back to prop
+    const effectiveSessionId = shouldUseWebSocket && wsContext?.sessionId ? wsContext.sessionId : sessionId;
     const wsIsQuerying =
         shouldUseWebSocket && wsContext
             ? wsContext.status === "connecting" ||
@@ -186,8 +191,21 @@ const ChatPanelInternal: FC<ChatPanelProps & { wsContext?: ReturnType<typeof use
                 stats={stats}
                 isConnected={wsIsConnected}
                 onShareClick={onShareClick}
+                onDatabaseConfigClick={() => setIsDatabaseConfigOpen(true)}
                 readOnly={readOnly}
             />
+
+            {/* Database Configuration Modal */}
+            {effectiveSessionId && (
+                <DatabaseConfigModal
+                    isOpen={isDatabaseConfigOpen}
+                    onClose={() => setIsDatabaseConfigOpen(false)}
+                    sessionId={effectiveSessionId}
+                    onConfigSaved={() => {
+                        setIsDatabaseConfigOpen(false);
+                    }}
+                />
+            )}
 
             <div className="flex-1 overflow-y-auto min-h-0">
                 {showEmptyState ? (
@@ -240,7 +258,7 @@ const ChatPanel: FC<ChatPanelProps> = (props) => {
     // Only use WebSocket if explicitly enabled
     const wsContext = useWebSocket ? wsContextRaw : null;
 
-    return <ChatPanelInternal {...props} wsContext={wsContext} />;
+    return <ChatPanelInternal {...props} wsContext={wsContext} sessionId={props.sessionId} />;
 };
 
 export default ChatPanel;

@@ -1,10 +1,11 @@
 import { FC } from "react";
-import { SlidersHorizontal, MoreVertical, Sparkles, Share2 } from "lucide-react";
+import { SlidersHorizontal, MoreVertical, Sparkles, Share2, Database } from "lucide-react";
 
 interface ChatHeaderProps {
     stats?: { total_chunks: number; status: string } | null;
     isConnected?: boolean;
     onShareClick?: () => void;
+    onDatabaseConfigClick?: () => void;
     readOnly?: boolean;
 }
 
@@ -12,6 +13,7 @@ export const ChatHeader: FC<ChatHeaderProps> = ({
     stats,
     isConnected = false,
     onShareClick,
+    onDatabaseConfigClick,
     readOnly = false,
 }) => {
     return (
@@ -33,6 +35,15 @@ export const ChatHeader: FC<ChatHeaderProps> = ({
                 />
             </div>
             <div className="flex items-center gap-2">
+                {!readOnly && onDatabaseConfigClick && (
+                    <button
+                        onClick={onDatabaseConfigClick}
+                        className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors"
+                        title="Configure Database"
+                    >
+                        <Database size={18} />
+                    </button>
+                )}
                 {!readOnly && onShareClick && (
                     <button
                         onClick={onShareClick}

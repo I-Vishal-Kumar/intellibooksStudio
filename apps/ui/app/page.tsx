@@ -1,22 +1,30 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useUser } from "@clerk/nextjs";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 
 export default function Home() {
   const { isSignedIn, isLoaded } = useUser();
   const router = useRouter();
+  const pathname = usePathname();
+  const hasRedirected = useRef(false);
 
   useEffect(() => {
-    if (isLoaded) {
+    if (isLoaded && !hasRedirected.current) {
+      console.log({ isSignedIn, pathname, hasRedirected: hasRedirected.current , isLoaded});
+      hasRedirected.current = true;
       if (isSignedIn) {
-        router.push("/dashboard");
+        if (pathname !== "/dashboard") {
+          router.push("/dashboard");
+        }
       } else {
-        router.push("/sign-in");
+        if (pathname !== "/sign-in") {
+          router.push("/sign-in");
+        }
       }
     }
-  }, [isLoaded, isSignedIn, router]);
+  }, [isLoaded, isSignedIn, router, pathname]);
 
   // Show loading while checking auth
   return (

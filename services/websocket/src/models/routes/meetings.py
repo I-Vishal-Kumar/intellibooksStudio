@@ -10,16 +10,16 @@ from uuid import uuid4
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 
-from ..config import get_settings
-from ..connection_manager import manager
-from ..utils.whisper import (
+from ...config import get_settings
+from ...connection_manager import manager
+from ...utils.whisper import (
     transcribe_chunk,
     WhisperError,
     find_whisper_binary,
     find_whisper_model,
 )
-from ..utils.diarization import run_diarization, DiarizationError
-from ..utils.redis_client import (
+from ...utils.diarization import run_diarization, DiarizationError
+from ...utils.redis_client import (
     save_session,
     get_session,
     update_session_field,
@@ -27,7 +27,7 @@ from ..utils.redis_client import (
     get_processing_state,
     get_metadata,
 )
-from ..utils.background_processor import start_background_processing
+from ...utils.background_processor import start_background_processing
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/meetings", tags=["meetings"])
