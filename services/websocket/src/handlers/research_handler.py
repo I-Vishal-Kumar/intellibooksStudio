@@ -55,7 +55,8 @@ async def process_research_message(message: ChatMessage, research_params: Option
         if ResearchAgent is None:
             return _get_demo_response(message)
         
-        research_agent = ResearchAgent()
+        # Initialize research agent with session_id for memory isolation
+        research_agent = ResearchAgent(session_id=message.session_id, enable_memory=True)
         
         # Build input data for research agent
         input_data = {

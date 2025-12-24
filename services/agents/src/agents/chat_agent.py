@@ -13,8 +13,29 @@ from identity import Skill, TrustLevel, ActionType
 from base import BaseAgent, AgentResult, AgentContext
 
 from ..llm_factory import create_llm_settings
+from ..middleware import GuardrailsMiddleware
 
 logger = logging.getLogger(__name__)
+
+# Initialize guardrails middleware for ChatAgent
+_guardrails_middleware = None
+
+def get_guardrails_middleware():
+    """Get or create guardrails middleware instance."""
+    global _guardrails_middleware
+    if _guardrails_middleware is None:
+        _guardrails_middleware = GuardrailsMiddleware(
+            detect_pii=True,
+            pii_types=["email", "credit_card", "ip", "api_key", "phone", "ssn"],
+            pii_strategy="redact",
+            detect_prompt_injection=True,
+            detect_toxic_content=True,
+            banned_keywords=["hack", "exploit", "malware", "virus"],
+            use_model_safety_check=False,
+            block_on_violation=True,
+            log_violations=True,
+        )
+    return _guardrails_middleware
 
 
 class ChatAgent(BaseAgent):
@@ -93,6 +114,45 @@ Guidelines:
                 result.mark_complete()
                 return result
 
+            # Apply guardrails to input (before_model hook)
+            guardrails = get_guardrails_middleware()
+            input_state = {
+                "messages": [{"role": "user", "content": message}]
+            }
+            
+            # Import GuardrailsBlockedException to catch it
+            from ..middleware.guardrails_middleware import GuardrailsBlockedException
+            
+            try:
+                guardrails_result = guardrails.before_model(input_state)
+            except GuardrailsBlockedException as e:
+                # Guardrails blocked the request - return blocking message
+                self.logger.warning(f"🚫 Request blocked by guardrails: {e.reason}")
+                result.success = True
+                result.data = {
+                    "response": e.message,
+                    "message": message,
+                    "blocked": True,
+                }
+                result.metadata = {
+                    "input_length": len(message),
+                    "response_length": len(e.message),
+                    "blocked_by_guardrails": True,
+                    "block_reason": e.reason,
+                }
+                result.mark_complete()
+                return result
+            
+            # Get potentially modified message (PII redacted, etc.)
+            if guardrails_result and guardrails_result.get("messages"):
+                modified_messages = guardrails_result["messages"]
+                if modified_messages:
+                    modified_msg = modified_messages[0]
+                    if isinstance(modified_msg, dict):
+                        message = modified_msg.get("content", message)
+                    elif hasattr(modified_msg, "content"):
+                        message = getattr(modified_msg, "content", message)
+
             # Create prompt with system message
             prompt = ChatPromptTemplate.from_messages([
                 ("system", self.system_prompt),
@@ -102,10 +162,30 @@ Guidelines:
             # Use base LLM (no structured output needed for chat)
             chain = prompt | self.llm | StrOutputParser()
             response = await chain.ainvoke({"message": message})
+            response = response.strip()
+
+            # Apply guardrails to output (after_model hook)
+            output_state = {
+                "messages": [
+                    {"role": "user", "content": message},
+                    {"role": "assistant", "content": response}
+                ]
+            }
+            guardrails_output_result = guardrails.after_model(output_state)
+            
+            # Get potentially modified response (PII redacted, toxic content filtered, etc.)
+            if guardrails_output_result and guardrails_output_result.get("messages"):
+                modified_messages = guardrails_output_result["messages"]
+                if len(modified_messages) > 1:
+                    modified_response = modified_messages[-1]
+                    if isinstance(modified_response, dict):
+                        response = modified_response.get("content", response)
+                    elif hasattr(modified_response, "content"):
+                        response = getattr(modified_response, "content", response)
 
             result.success = True
             result.data = {
-                "response": response.strip(),
+                "response": response,
                 "message": message,
             }
             result.metadata = {

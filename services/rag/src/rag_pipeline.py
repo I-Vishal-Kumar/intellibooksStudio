@@ -539,6 +539,9 @@ class ChromaDBStore:
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[SearchResult]:
         """Search for similar documents."""
+        # Import SearchResult from vector_store to match SemanticRetriever's expectation
+        from .vector_store import SearchResult as VectorStoreSearchResult
+        
         # Generate query embedding
         query_embedding = self._embedding_service.encode_single(query).tolist()
 
@@ -564,14 +567,15 @@ class ChromaDBStore:
             include=["documents", "metadatas", "distances"],
         )
 
-        # Convert to SearchResult
+        # Convert to SearchResult from vector_store (not rag_pipeline's SearchResult)
+        # This ensures compatibility with SemanticRetriever
         search_results = []
         if results.get("ids") and results["ids"][0]:
             for i, doc_id in enumerate(results["ids"][0]):
                 distance = results["distances"][0][i] if results.get("distances") else 0
                 score = 1 - distance
 
-                search_results.append(SearchResult(
+                search_results.append(VectorStoreSearchResult(
                     id=doc_id,
                     content=results["documents"][0][i] if results.get("documents") else "",
                     score=score,

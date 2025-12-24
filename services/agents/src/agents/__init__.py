@@ -10,6 +10,7 @@ from .chat_agent import ChatAgent
 from .mood_agent import MoodAnalysisAgent
 from .agenda_agent import AgendaExtractionAgent
 from .research_agent import ResearchAgent
+from .compliance_agent import ComplianceAgent
 
 __all__ = [
     "TranscriptionAgent",
@@ -22,4 +23,5 @@ __all__ = [
     "MoodAnalysisAgent",
     "AgendaExtractionAgent",
     "ResearchAgent",
+    "ComplianceAgent",
 ]
