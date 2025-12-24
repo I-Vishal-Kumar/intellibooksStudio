@@ -23,22 +23,18 @@ interface RAGStats {
     status: string;
 }
 
-// Processing status from smart handler
-interface ProcessingStatus {
-    intent: "general_chat" | "knowledge_query" | "hybrid";
-    description: string;
-}
-
 interface ChatPanelProps {
     hasSources: boolean;
     onUploadClick?: () => void;
     isUploading?: boolean;
     messages?: Message[];
     onSendMessage?: (message: string) => void;
+    onShareClick?: () => void;
     isQuerying?: boolean;
     stats?: RAGStats | null;
     useWebSocket?: boolean;
     sessionId?: string;
+    readOnly?: boolean;
 }
 
 // Internal component that uses WebSocket context
@@ -47,10 +43,12 @@ const ChatPanelInternal: FC<ChatPanelProps & { wsContext?: ReturnType<typeof use
     isUploading,
     messages: externalMessages = [],
     onSendMessage,
+    onShareClick,
     isQuerying: externalIsQuerying = false,
     stats,
     useWebSocket = true,
     wsContext = null,
+    readOnly = false,
 }) => {
     const [input, setInput] = useState("");
     const [isTranscribing, setIsTranscribing] = useState(false);
@@ -65,39 +63,38 @@ const ChatPanelInternal: FC<ChatPanelProps & { wsContext?: ReturnType<typeof use
     const wsIsQuerying =
         shouldUseWebSocket && wsContext
             ? wsContext.status === "connecting" ||
-              wsProcessingStatus !== null ||
-              (wsMessages.length > 0 &&
-                  wsMessages[wsMessages.length - 1]?.role === "user" &&
-                  !wsMessages.some(
-                      (m, i) =>
-                          i >
-                              wsMessages.findIndex(
-                                  (msg) => msg.id === wsMessages[wsMessages.length - 1]?.id
-                              ) &&
-                          m.role === "assistant"
-                  ))
+            wsProcessingStatus !== null ||
+            (wsMessages.length > 0 &&
+                wsMessages[wsMessages.length - 1]?.role === "user" &&
+                !wsMessages.some(
+                    (m, i) =>
+                        i >
+                        wsMessages.findIndex(
+                            (msg) => msg.id === wsMessages[wsMessages.length - 1]?.id
+                        ) &&
+                        m.role === "assistant"
+                ))
             : false;
 
     // Use WebSocket messages if available, otherwise fall back to external messages
-    // Filter out system messages and ensure role is user or assistant
     const messages: Message[] = shouldUseWebSocket && wsContext
         ? wsMessages
-              .filter((msg) => msg.role === "user" || msg.role === "assistant")
-              .map((msg) => ({
-                  id: msg.id,
-                  role: msg.role as "user" | "assistant",
-                  content: msg.content,
-                  timestamp: msg.timestamp,
-                  sources: Array.isArray(msg.metadata?.sources)
-                      ? (msg.metadata!.sources as Array<{
-                            id: string;
-                            content_preview: string;
-                            score: number;
-                            metadata: Record<string, unknown>;
-                        }>)
-                      : [],
-                  metadata: msg.metadata || {},
-              }))
+            .filter((msg) => msg.role === "user" || msg.role === "assistant")
+            .map((msg) => ({
+                id: msg.id,
+                role: msg.role as "user" | "assistant",
+                content: msg.content,
+                timestamp: msg.timestamp,
+                sources: Array.isArray(msg.metadata?.sources)
+                    ? (msg.metadata!.sources as Array<{
+                        id: string;
+                        content_preview: string;
+                        score: number;
+                        metadata: Record<string, unknown>;
+                    }>)
+                    : [],
+                metadata: msg.metadata || {},
+            }))
         : externalMessages;
 
     const isQuerying = shouldUseWebSocket && wsContext ? wsIsQuerying : externalIsQuerying;
@@ -168,7 +165,6 @@ const ChatPanelInternal: FC<ChatPanelProps & { wsContext?: ReturnType<typeof use
 
         if (shouldUseWebSocket && wsContext) {
             const sessionId = wsContext.sessionId || undefined;
-            // Use unified sendMessage - smart handler auto-detects intent
             if (sessionId) {
                 wsContext.sendMessage(trimmedInput, sessionId);
             }
@@ -189,9 +185,10 @@ const ChatPanelInternal: FC<ChatPanelProps & { wsContext?: ReturnType<typeof use
             <ChatHeader
                 stats={stats}
                 isConnected={wsIsConnected}
+                onShareClick={onShareClick}
+                readOnly={readOnly}
             />
 
-            {/* Chat Content */}
             <div className="flex-1 overflow-y-auto min-h-0">
                 {showEmptyState ? (
                     <EmptyState
@@ -228,6 +225,7 @@ const ChatPanelInternal: FC<ChatPanelProps & { wsContext?: ReturnType<typeof use
                 cancelRecording={cancelRecording}
                 formatDuration={formatDuration}
                 onTranscribeAudio={handleTranscribeAudio}
+                readOnly={readOnly}
             />
         </div>
     );
@@ -236,19 +234,11 @@ const ChatPanelInternal: FC<ChatPanelProps & { wsContext?: ReturnType<typeof use
 // Main component - always call hook (React requirement)
 const ChatPanel: FC<ChatPanelProps> = (props) => {
     const { useWebSocket = true } = props;
-
     // Always call the hook unconditionally (required by React rules)
-    // If WebSocketProvider is not available, this will throw
-    // The parent should wrap with WebSocketProvider or set useWebSocket=false
-    let wsContext: ReturnType<typeof useWebSocketContext> | null = null;
-
-    // Always call hook - if provider missing, it will throw
-    wsContext = useWebSocketContext();
+    const wsContextRaw = useWebSocketContext();
 
     // Only use WebSocket if explicitly enabled
-    if (!useWebSocket) {
-        wsContext = null;
-    }
+    const wsContext = useWebSocket ? wsContextRaw : null;
 
     return <ChatPanelInternal {...props} wsContext={wsContext} />;
 };

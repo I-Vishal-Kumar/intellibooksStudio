@@ -9,12 +9,16 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from .config import get_settings
 from .connection_manager import manager
 from .handlers.smart_handler import handle_smart_message
+from .handlers.chat_handler import handle_chat_message
+from .utils.permissions import get_user_role
+from .models.db import SessionLocal
 from .models.messages import ChatResponse, SystemMessage, ErrorMessage
-from .routes import transcription, meetings
+from .routes import transcription, meetings, conversations, notifications
 
 # Configure logging
 logging.basicConfig(
@@ -142,7 +146,10 @@ app.add_middleware(
 
 # Include routers
 app.include_router(transcription.router)
+app.include_router(transcription.router)
 app.include_router(meetings.router)
+app.include_router(conversations.router)
+app.include_router(notifications.router)
 
 
 @app.get("/api/health")
@@ -332,13 +339,41 @@ async def get_session_messages(session_id: str, limit: int = 100, offset: int = 
 
 
 @app.websocket("/ws/chat/{session_id}")
-async def websocket_chat_endpoint(websocket: WebSocket, session_id: str):
+async def websocket_chat_endpoint(websocket: WebSocket, session_id: str, user_id: Optional[str] = None):
     """
     WebSocket endpoint for chat messaging.
     
-    Clients connect to: ws://localhost:8004/ws/chat/{session_id}
+    Clients connect to: ws://localhost:8004/ws/chat/{session_id}?user_id={user_id}
     """
-    await manager.connect(websocket, session_id)
+    # If user_id not provided in arguments, try query params
+    if not user_id:
+        user_id = websocket.query_params.get("user_id")
+
+    db = SessionLocal()
+    try:
+        # Check permissions
+        from uuid import UUID
+        
+        # Allow temporary frontend-generated sessions
+        if session_id.startswith("session-"):
+            logger.info(f"Allowing temporary session: {session_id}")
+            await manager.connect(websocket, session_id)
+        else:
+            try:
+                conv_uuid = UUID(session_id)
+                role = await get_user_role(db, conv_uuid, user_id)
+                if not role:
+                    logger.warning(f"Permission denied for user {user_id} on session {session_id}")
+                    await websocket.close(code=1008) # Policy Violation
+                    return
+                
+                await manager.connect(websocket, session_id)
+            except ValueError:
+                logger.error(f"Invalid session ID (not UUID or session-): {session_id}")
+                await websocket.close(code=1008) # Policy Violation
+                return
+    finally:
+        db.close()
     
     # Send welcome message
     welcome_message = SystemMessage(

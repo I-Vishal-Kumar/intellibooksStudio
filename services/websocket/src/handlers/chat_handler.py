@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ..models.messages import ChatMessage, ChatResponse
 from ..connection_manager import manager
+from ..models.db import SessionLocal, Conversation, Message
 
 logger = logging.getLogger(__name__)
 
@@ -141,8 +142,41 @@ async def handle_chat_message(
         chat_message = ChatMessage(**message_data)
         chat_message.session_id = session_id  # Ensure session_id matches
         
-        # Process message (will call Redis pub/sub in future)
+        # Save User Message to DB
+        db = SessionLocal()
+        conversation = db.query(Conversation).filter(Conversation.id == session_id).first()
+        
+        # Auto-create conversation if new (for now, usually created via API)
+        if not conversation:
+            # Try to get user_id from metadata or use default
+            user_id = chat_message.user_id or "unknown_user"
+            conversation = Conversation(id=session_id, user_id=user_id, title="New Chat")
+            db.add(conversation)
+            db.commit()
+            
+        user_msg_db = Message(
+            conversation_id=session_id,
+            role="user",
+            content=chat_message.content
+        )
+        db.add(user_msg_db)
+        db.commit()
+        
+        # Process message
         response = await process_chat_message(chat_message)
+        
+        # Save Assistant Response to DB
+        if response and response.type == "message":
+            assistant_msg_db = Message(
+                conversation_id=session_id,
+                role="assistant",
+                content=response.content,
+                metadata_=response.metadata or {}
+            )
+            db.add(assistant_msg_db)
+            db.commit()
+            
+        db.close()
         
         return response
         

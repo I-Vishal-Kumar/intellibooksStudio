@@ -39,7 +39,7 @@ export const EmptyState: FC<EmptyStateProps> = ({
                 <div className="space-y-2">
                     <h3 className="text-lg font-medium text-gray-700">Start a conversation</h3>
                     <p className="text-sm text-gray-400 max-w-sm">
-                        Upload documents using the sidebar, or just start chatting. I'll automatically search your knowledge base when needed.
+                        Upload documents using the sidebar, or just start chatting. I&apos;ll automatically search your knowledge base when needed.
                     </p>
                 </div>
             </div>
@@ -63,7 +63,7 @@ export const EmptyState: FC<EmptyStateProps> = ({
                 Smart Chat Ready
             </h3>
             <p className="text-gray-500 mb-2 max-w-md">
-                Ask anything! I'll automatically determine whether to chat directly or search your knowledge base.
+                Ask anything! I&apos;ll automatically determine whether to chat directly or search your knowledge base.
             </p>
             <div className="flex items-center gap-4 text-xs text-gray-400 mb-6">
                 <div className="flex items-center gap-1">

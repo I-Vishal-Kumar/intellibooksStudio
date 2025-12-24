@@ -32,12 +32,14 @@ const WebSocketContext = createContext<WebSocketContextValue | undefined>(undefi
 interface WebSocketProviderProps {
   children: React.ReactNode;
   sessionId?: string | null;
+  userId?: string | null;
   onSessionIdChange?: (id: string | null) => void;
 }
 
 export function WebSocketProvider({
   children,
   sessionId: initialSessionId,
+  userId,
   onSessionIdChange,
 }: WebSocketProviderProps) {
   const [sessionId, setSessionIdState] = useState<string | null>(initialSessionId || null);
@@ -47,13 +49,17 @@ export function WebSocketProvider({
   // Get WebSocket URL from environment or use default
   const getWebSocketUrl = useCallback((sessionId: string | null) => {
     if (!sessionId) return null;
-    
+
     const wsPort = 8004; // From ports.json - websocket service port
     const wsHost = process.env.NEXT_PUBLIC_WS_HOST || "localhost";
     const protocol = process.env.NODE_ENV === "production" ? "wss" : "ws";
-    
-    return `${protocol}://${wsHost}:${wsPort}/ws/chat/${sessionId}`;
-  }, []);
+
+    let url = `${protocol}://${wsHost}:${wsPort}/ws/chat/${sessionId}`;
+    if (userId) {
+      url += `?user_id=${userId}`;
+    }
+    return url;
+  }, [userId]);
 
   const wsUrl = sessionId ? getWebSocketUrl(sessionId) : null;
 
@@ -145,7 +151,12 @@ export function WebSocketProvider({
       console.log("WebSocket disconnected from session:", sessionId);
     },
     onError: (err) => {
-      console.error("WebSocket error:", err);
+      console.error("WebSocket error details:", {
+        message: err instanceof Error ? err.message : "Unknown error",
+        event: err,
+        url: wsUrl,
+        sessionId
+      });
     },
     reconnectInterval: 3000,
     maxReconnectAttempts: 5,

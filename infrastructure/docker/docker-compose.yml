@@ -21,7 +21,7 @@ services:
     ports:
       - "5433:5432"  # Using 5433 to avoid conflict with local PostgreSQL
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d intellibooks"]
+      test: [ "CMD-SHELL", "pg_isready -U admin -d intellibooks" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -37,7 +37,7 @@ services:
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -56,7 +56,7 @@ services:
     ports:
       - "8000:8000"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -75,7 +75,7 @@ services:
       - "5672:5672"
       - "15672:15672"
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      test: [ "CMD", "rabbitmq-diagnostics", "check_running" ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -87,18 +87,13 @@ services:
     image: rayproject/ray:2.52.0-py312
     container_name: intellibooks-ray-head
     command: >
-      bash -c "ray start --head
-      --dashboard-host=0.0.0.0
-      --port=6379
-      --dashboard-port=8265
-      --ray-client-server-port=10001
-      --block"
+      bash -c "ray start --head --dashboard-host=0.0.0.0 --port=6379 --dashboard-port=8265 --ray-client-server-port=10001 --block"
     environment:
       - RAY_DISABLE_DOCKER_CPU_WARNING=1
     ports:
-      - "6380:6379"      # Ray GCS (avoid conflict with Redis)
-      - "8265:8265"      # Ray Dashboard
-      - "10001:10001"    # Ray Client
+      - "6380:6379" # Ray GCS (avoid conflict with Redis)
+      - "8265:8265" # Ray Dashboard
+      - "10001:10001" # Ray Client
     shm_size: '2gb'
     networks:
       - intellibooks-network

@@ -31,6 +31,7 @@ import {
     generateSessionId,
     Session as APISession,
 } from "@/lib/api/sessions";
+import ShareModal from "@/components/dashboard_v2/ShareModal";
 import dummyData from "../../../dummy_data/dummy_data.json";
 
 // RAG API Configuration
@@ -72,9 +73,10 @@ interface RAGStats {
 }
 
 export default function DashboardV2() {
-    const { isSignedIn, isLoaded } = useUser();
+    const { isSignedIn, isLoaded, user } = useUser();
     const router = useRouter();
     const searchParams = useSearchParams();
+    const chatIdParam = searchParams.get("chatId");
 
     // Panel state
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -92,6 +94,76 @@ export default function DashboardV2() {
     const [showVideo, setShowVideo] = useState(false);
     const [showInfographic, setShowInfographic] = useState(false);
     const [showSlideDeck, setShowSlideDeck] = useState(false);
+    const [showShareModal, setShowShareModal] = useState(false);
+    const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
+    const [userRole, setUserRole] = useState<string>("owner");
+
+    // Fetch user role when conversation changes
+    useEffect(() => {
+        const fetchRole = async () => {
+            if (!currentConversationId || !user?.id) return;
+            try {
+                const res = await fetch(`http://localhost:8004/api/conversations/${currentConversationId}/collaborators`, {
+                    headers: { "X-User-Id": user.id }
+                });
+                if (res.ok) {
+                    const collabs = await res.json();
+                    const me = collabs.find((c: any) => c.user_id === user.id);
+                    if (me) {
+                        setUserRole(me.role);
+                    } else {
+                        // If not a collaborator, check if I'm the owner
+                        // (Owner is not always in the collaborator list)
+                        // Actually, my get_user_role utility handles this on backend.
+                        // I should probably have a dedicated "GET /me/role" endpoint.
+                        // For now, let's assume if I'm not in collab list, I'm the owner if it's my chat.
+                        setUserRole("owner");
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to fetch role:", err);
+            }
+        };
+        fetchRole();
+    }, [currentConversationId, user?.id]);
+
+    // Handle chatId param from URL (e.g. from notifications)
+    useEffect(() => {
+        if (!chatIdParam || !user?.id) return;
+
+        const loadConversation = async () => {
+            try {
+                const res = await fetch(`http://localhost:8004/api/conversations/${chatIdParam}`, {
+                    headers: { "X-User-Id": user.id }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    setCurrentConversationId(data.id);
+                    setNotebookTitle(data.title || "Untitled Chat");
+                    // Transform messages to frontend format
+                    const formattedMsgs = data.messages.map((m: any) => ({
+                        id: m.id,
+                        role: m.role,
+                        content: m.content,
+                        timestamp: new Date(m.created_at)
+                    }));
+                    setMessages(formattedMsgs);
+                    if (data.document_ids && data.document_ids.length > 0) {
+                        const loadedDocs = data.document_ids.map((id: string) => ({
+                            id,
+                            filename: "Shared Document",
+                            status: "ready" as const,
+                            uploadedAt: new Date()
+                        }));
+                        setDocuments(loadedDocs);
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to load conversation from URL:", err);
+            }
+        };
+        loadConversation();
+    }, [chatIdParam, user?.id]);
 
     // Customization Modal
     const [showCustomization, setShowCustomization] = useState(false);
@@ -377,6 +449,18 @@ export default function DashboardV2() {
         setMessages((prev) => [...prev, userMessage]);
         setIsQuerying(true);
 
+        // Save to backend if conversation exists
+        if (currentConversationId) {
+            fetch(`http://localhost:8004/api/conversations/${currentConversationId}/messages`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-User-Id": user?.id || "anonymous"
+                },
+                body: JSON.stringify({ role: "user", content: query.trim() })
+            }).catch(e => console.error("Failed to save user message:", e));
+        }
+
         try {
             const response = await fetch(`${RAG_API_URL}/api/rag/query`, {
                 method: "POST",
@@ -395,6 +479,18 @@ export default function DashboardV2() {
             };
 
             setMessages((prev) => [...prev, assistantMessage]);
+
+            // Save to backend if conversation exists
+            if (currentConversationId) {
+                fetch(`http://localhost:8004/api/conversations/${currentConversationId}/messages`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-User-Id": user?.id || "anonymous"
+                    },
+                    body: JSON.stringify({ role: "assistant", content: result.answer })
+                }).catch(e => console.error("Failed to save assistant message:", e));
+            }
         } catch (error) {
             const errorMessage: Message = {
                 id: (Date.now() + 1).toString(),
@@ -408,6 +504,52 @@ export default function DashboardV2() {
         }
     };
 
+    const handleShareClick = async () => {
+        console.log("Share button clicked. Message count:", messages.length);
+        if (messages.length === 0) {
+            alert("No messages to share yet!");
+            return;
+        }
+
+        // If we don't have a conversation ID yet, create one in the database
+        if (!currentConversationId) {
+            console.log("Saving conversation to backend before sharing...");
+            try {
+                const res = await fetch("http://localhost:8004/api/conversations/", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        title: notebookTitle,
+                        user_id: user?.id || "anonymous",
+                        document_ids: documents.map(d => d.id)
+                    })
+                });
+                const data = await res.json();
+                const newId = data.id;
+                console.log("Conversation created with ID:", newId);
+                setCurrentConversationId(newId);
+                setUserRole("owner");
+
+                // Save all previous messages to this new conversation
+                for (const msg of messages) {
+                    await fetch(`http://localhost:8004/api/conversations/${newId}/messages`, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "X-User-Id": user?.id || "anonymous"
+                        },
+                        body: JSON.stringify({ role: msg.role, content: msg.content })
+                    });
+                }
+            } catch (err) {
+                console.error("Failed to create conversation for sharing:", err);
+            }
+        }
+        console.log("Opening Share Modal...");
+        setShowShareModal(true);
+    };
+
+    // Delete document
     // Delete document - uses the API client
     const handleDeleteDocument = async (documentId: string) => {
         try {
@@ -557,6 +699,8 @@ export default function DashboardV2() {
             <Header
                 title={isUploading ? "Uploading..." : notebookTitle}
                 onCreateNotebook={handleCreateNotebook}
+                onShare={handleShareClick}
+                currentUserId={user?.id || "anonymous"}
             />
 
             <main className="flex-1 flex overflow-hidden p-4 gap-4">
@@ -585,13 +729,14 @@ export default function DashboardV2() {
                 {/* Chat Section */}
                 <div className="flex-1 flex flex-col min-w-0">
                     <div className="flex-1 bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
-                        <WebSocketProvider sessionId={currentSessionId}>
+                        <WebSocketProvider userId={user?.id} sessionId={currentSessionId}>
                             <ChatPanel
                                 hasSources={hasSources}
                                 onUploadClick={() => setShowUploadModal(true)}
                                 isUploading={isUploading}
                                 messages={messages}
                                 onSendMessage={handleQuery}
+                                onShareClick={handleShareClick}
                                 isQuerying={isQuerying}
                                 stats={stats}
                                 useWebSocket={true}
@@ -740,6 +885,15 @@ export default function DashboardV2() {
                     onClose={() => setShowUploadModal(false)}
                     onUpload={handleFileUpload}
                     onTextUpload={handleTextUpload}
+                />
+            )}
+
+            {showShareModal && (
+                <ShareModal
+                    isOpen={showShareModal}
+                    onClose={() => setShowShareModal(false)}
+                    conversationId={currentConversationId || undefined}
+                    currentUserId={user?.id || "anonymous"}
                 />
             )}
         </div>

@@ -21,6 +21,7 @@ interface MessageInputProps {
     cancelRecording: () => void;
     formatDuration: (seconds: number) => string;
     onTranscribeAudio: (audioBlob: Blob) => Promise<void>;
+    readOnly?: boolean;
 }
 
 export const MessageInput: FC<MessageInputProps> = ({
@@ -28,7 +29,6 @@ export const MessageInput: FC<MessageInputProps> = ({
     setInput,
     onSend,
     inputRef,
-    hasSources,
     isUploading,
     isQuerying,
     isConnected = true,
@@ -42,6 +42,7 @@ export const MessageInput: FC<MessageInputProps> = ({
     cancelRecording,
     formatDuration,
     onTranscribeAudio,
+    readOnly = false,
 }) => {
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === "Enter" && !e.shiftKey) {
@@ -51,7 +52,7 @@ export const MessageInput: FC<MessageInputProps> = ({
     };
 
     // Smart chat can work even without sources (for general chat)
-    const isDisabled = isUploading || !isConnected;
+    const isDisabled = isUploading || !isConnected || readOnly;
 
     return (
         <div className="p-4 bg-white shrink-0 border-t border-gray-100">
@@ -132,11 +133,10 @@ export const MessageInput: FC<MessageInputProps> = ({
                     <button
                         onClick={isRecording ? stopRecording : startRecording}
                         disabled={isDisabled}
-                        className={`p-2 rounded-xl transition-colors ${
-                            isRecording
-                                ? "bg-red-100 hover:bg-red-200 text-red-600"
-                                : "hover:bg-gray-200 text-gray-500 hover:text-gray-700"
-                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                        className={`p-2 rounded-xl transition-colors ${isRecording
+                            ? "bg-red-100 hover:bg-red-200 text-red-600"
+                            : "hover:bg-gray-200 text-gray-500 hover:text-gray-700"
+                            } disabled:opacity-50 disabled:cursor-not-allowed`}
                         title={isRecording ? "Stop recording" : "Start voice input"}
                     >
                         {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}

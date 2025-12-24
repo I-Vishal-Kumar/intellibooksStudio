@@ -1,12 +1,19 @@
-import { FC } from "react";
 import { Share2, Settings, Grid3X3, Plus } from "lucide-react";
+import NotificationCenter from "./NotificationCenter";
 
 interface HeaderProps {
     title?: string;
     onCreateNotebook?: () => void;
+    onShare?: () => void;
+    currentUserId?: string;
 }
 
-const Header: FC<HeaderProps> = ({ title = "jAI Enterprise Agent Characteristics Framework", onCreateNotebook }) => {
+const Header: FC<HeaderProps> = ({
+    title = "jAI Enterprise Agent Characteristics Framework",
+    onCreateNotebook,
+    onShare,
+    currentUserId
+}) => {
     return (
         <header className="flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200 shrink-0">
             <div className="flex items-center gap-4">
@@ -25,10 +32,15 @@ const Header: FC<HeaderProps> = ({ title = "jAI Enterprise Agent Characteristics
                     Create notebook
                 </button>
 
-                <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors flex items-center gap-1">
+                <button
+                    onClick={onShare}
+                    className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors flex items-center gap-1"
+                >
                     <Share2 size={18} />
                     <span className="text-sm font-medium">Share</span>
                 </button>
+
+                <NotificationCenter currentUserId={currentUserId || ""} />
 
                 <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors flex items-center gap-1">
                     <Settings size={18} />

@@ -1,14 +1,18 @@
 import { FC } from "react";
-import { SlidersHorizontal, MoreVertical, Sparkles } from "lucide-react";
+import { SlidersHorizontal, MoreVertical, Sparkles, Share2 } from "lucide-react";
 
 interface ChatHeaderProps {
     stats?: { total_chunks: number; status: string } | null;
     isConnected?: boolean;
+    onShareClick?: () => void;
+    readOnly?: boolean;
 }
 
 export const ChatHeader: FC<ChatHeaderProps> = ({
     stats,
     isConnected = false,
+    onShareClick,
+    readOnly = false,
 }) => {
     return (
         <div className="flex items-center justify-between p-4 border-b border-gray-100 shrink-0">
@@ -29,6 +33,15 @@ export const ChatHeader: FC<ChatHeaderProps> = ({
                 />
             </div>
             <div className="flex items-center gap-2">
+                {!readOnly && onShareClick && (
+                    <button
+                        onClick={onShareClick}
+                        className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors"
+                        title="Share Conversation"
+                    >
+                        <Share2 size={18} />
+                    </button>
+                )}
                 <button className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors">
                     <SlidersHorizontal size={18} />
                 </button>
