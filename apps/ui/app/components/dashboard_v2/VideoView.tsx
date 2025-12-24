@@ -4,6 +4,7 @@ import { Play, Share2, Download, Maximize2, MoreVertical, Settings, Volume2 } fr
 interface VideoViewProps {
     onExpand?: () => void;
     isModal?: boolean;
+    onClose?: () => void;
 }
 
 const VideoView: React.FC<VideoViewProps> = ({ onExpand, isModal }) => {

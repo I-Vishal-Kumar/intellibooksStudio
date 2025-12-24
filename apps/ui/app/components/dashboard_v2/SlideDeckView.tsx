@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Play, Download, Share2, Maximize2, Layers } 
 interface SlideDeckViewProps {
     onExpand?: () => void;
     isModal?: boolean;
+    onClose?: () => void;
 }
 
 const SlideDeckView: React.FC<SlideDeckViewProps> = ({ onExpand, isModal }) => {

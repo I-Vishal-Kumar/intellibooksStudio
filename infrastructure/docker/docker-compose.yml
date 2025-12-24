@@ -19,7 +19,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./init-scripts:/docker-entrypoint-initdb.d
     ports:
-      - "5439:5432"
+      - "5433:5432"  # Using 5433 to avoid conflict with local PostgreSQL
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U admin -d intellibooks" ]
       interval: 10s

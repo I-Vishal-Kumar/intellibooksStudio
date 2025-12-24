@@ -32,6 +32,7 @@ interface StudioPanelProps {
     pendingGenerationLabel?: string;
     hasSources: boolean;
     data: any;
+    onMindMapNodeClick?: (nodeLabel: string, nodeData: any) => void;
 }
 
 const IconMapper = ({ name, size = 18, className = "" }: { name: string; size?: number; className?: string }) => {
@@ -40,7 +41,7 @@ const IconMapper = ({ name, size = 18, className = "" }: { name: string; size?: 
     return <IconComponent size={size} className={className} />;
 };
 
-const StudioPanel: FC<StudioPanelProps> = ({ isCollapsed, onToggle, onNoteClick, onItemClick, pendingGenerationLabel, hasSources, data: initialData }) => {
+const StudioPanel: FC<StudioPanelProps> = ({ isCollapsed, onToggle, onNoteClick, onItemClick, pendingGenerationLabel, hasSources, data: initialData, onMindMapNodeClick }) => {
     const [currentView, setCurrentView] = useState<'grid' | 'flashcards' | 'architecture' | 'report' | 'quiz'>('grid');
     const [generatingItems, setGeneratingItems] = useState<string[]>([]);
     const [notes, setNotes] = useState(initialData.notes);
@@ -53,6 +54,14 @@ const StudioPanel: FC<StudioPanelProps> = ({ isCollapsed, onToggle, onNoteClick,
 
     const handleItemClick = (item: any) => {
         if (!hasSources) return;
+
+        // For Mind Map, directly show the view without generation delay
+        // It auto-generates from RAG data
+        if (item.label === 'Mind Map') {
+            setCurrentView('architecture');
+            return;
+        }
+
         onItemClick?.(item.label);
     };
 
@@ -119,7 +128,17 @@ const StudioPanel: FC<StudioPanelProps> = ({ isCollapsed, onToggle, onNoteClick,
                 </div>
                 <div className="flex-1 overflow-y-auto">
                     {currentView === 'flashcards' && <FlashcardsView onExpand={() => onNoteClick?.('Flashcards')} />}
-                    {currentView === 'architecture' && <ArchitectureView isModal={false} onExpand={() => onNoteClick?.('Architecture')} />}
+                    {currentView === 'architecture' && (
+                        <ArchitectureView
+                            isModal={false}
+                            onExpand={() => onNoteClick?.('Architecture')}
+                            onNodeClick={(nodeId, nodeData) => {
+                                if (onMindMapNodeClick && nodeData?.label) {
+                                    onMindMapNodeClick(nodeData.label, nodeData);
+                                }
+                            }}
+                        />
+                    )}
                     {currentView === 'report' && <ReportView isModal={false} onExpand={() => onNoteClick?.('Report')} />}
                     {currentView === 'quiz' && <QuizView isModal={false} onExpand={() => onNoteClick?.('Quiz')} />}
                 </div>

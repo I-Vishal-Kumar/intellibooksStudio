@@ -42,7 +42,7 @@ export default function DashboardPage() {
       workflows: "/workflows",
       audio: "/audio",
       chat: "/chat",
-      knowledge: "/knowledge",
+      knowledge: "/dashboard/v2",  // Use v2 dashboard with session persistence
       analytics: "/analytics",
       settings: "/settings",
     };

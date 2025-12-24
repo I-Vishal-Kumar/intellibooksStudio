@@ -1,4 +1,4 @@
-import { FC } from "react";
+import { FC, useState } from "react";
 import * as Icons from "lucide-react";
 import {
     ChevronDown,
@@ -14,7 +14,9 @@ import {
     MoreHorizontal,
     X,
     BookOpen,
-    Upload
+    Upload,
+    AlertTriangle,
+    ServerCrash
 } from "lucide-react";
 
 interface UploadProgress {
@@ -46,6 +48,7 @@ interface SidebarProps {
     uploadProgress?: UploadProgress[];
     onDeleteSource?: (id: string) => void;
     onClearAll?: () => void;
+    onClearKnowledgeBase?: () => Promise<void>;
     stats?: RAGStats | null;
 }
 
@@ -58,8 +61,24 @@ const Sidebar: FC<SidebarProps> = ({
     uploadProgress = [],
     onDeleteSource,
     onClearAll,
+    onClearKnowledgeBase,
     stats
 }) => {
+    const [showClearKBConfirm, setShowClearKBConfirm] = useState(false);
+    const [isClearingKB, setIsClearingKB] = useState(false);
+
+    const handleClearKnowledgeBase = async () => {
+        if (!onClearKnowledgeBase) return;
+        setIsClearingKB(true);
+        try {
+            await onClearKnowledgeBase();
+            setShowClearKBConfirm(false);
+        } catch (error) {
+            console.error("Failed to clear knowledge base:", error);
+        } finally {
+            setIsClearingKB(false);
+        }
+    };
     if (isCollapsed) {
         return (
             <div className="w-12 bg-white border border-gray-200 rounded-2xl flex flex-col items-center py-4 gap-4 transition-all duration-300 shadow-sm">
@@ -277,16 +296,78 @@ const Sidebar: FC<SidebarProps> = ({
                 )}
             </div>
 
-            {/* Footer with Clear button */}
-            {sources.length > 0 && (
-                <div className="p-4 border-t border-gray-100">
-                    <button
-                        onClick={onClearAll}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors text-sm font-medium"
-                    >
-                        <Trash2 className="w-4 h-4" />
-                        Clear All Sources
-                    </button>
+            {/* Footer with Clear buttons */}
+            {(sources.length > 0 || (stats && stats.total_chunks > 0)) && (
+                <div className="p-4 border-t border-gray-100 space-y-2">
+                    {sources.length > 0 && (
+                        <button
+                            onClick={onClearAll}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors text-sm font-medium"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                            Clear Session Sources
+                        </button>
+                    )}
+                    {stats && stats.total_chunks > 0 && (
+                        <button
+                            onClick={() => setShowClearKBConfirm(true)}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-2 text-orange-600 hover:bg-orange-50 rounded-lg transition-colors text-sm font-medium border border-orange-200"
+                        >
+                            <ServerCrash className="w-4 h-4" />
+                            Clear Entire Knowledge Base
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {/* Clear Knowledge Base Confirmation Modal */}
+            {showClearKBConfirm && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-2xl p-6 max-w-md mx-4 shadow-xl">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                                <AlertTriangle className="w-6 h-6 text-red-600" />
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-semibold text-gray-900">Clear Entire Knowledge Base?</h3>
+                                <p className="text-sm text-gray-500">This action cannot be undone</p>
+                            </div>
+                        </div>
+
+                        <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+                            <p className="text-sm text-red-800 leading-relaxed">
+                                This will permanently delete <strong>all documents and embeddings</strong> from ChromaDB
+                                (both Docker and local instances). All {stats?.total_chunks || 0} chunks will be removed.
+                            </p>
+                        </div>
+
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setShowClearKBConfirm(false)}
+                                disabled={isClearingKB}
+                                className="flex-1 px-4 py-2.5 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-xl font-medium transition-colors disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleClearKnowledgeBase}
+                                disabled={isClearingKB}
+                                className="flex-1 px-4 py-2.5 text-white bg-red-600 hover:bg-red-700 rounded-xl font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                                {isClearingKB ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        Clearing...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Trash2 className="w-4 h-4" />
+                                        Clear Everything
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

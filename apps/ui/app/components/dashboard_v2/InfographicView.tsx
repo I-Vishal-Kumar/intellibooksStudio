@@ -4,6 +4,7 @@ import { Download, Share2, Maximize2, MoreVertical, Layout, BarChart2, PieChart,
 interface InfographicViewProps {
     onExpand?: () => void;
     isModal?: boolean;
+    onClose?: () => void;
 }
 
 const InfographicView: React.FC<InfographicViewProps> = ({ onExpand, isModal }) => {

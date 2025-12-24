@@ -17,6 +17,8 @@ dependencies = [
     "torch>=2.0.0",  # For pyannote.audio
     "torchaudio>=2.0.0",  # For audio processing
     "arrow>=1.3.0",  # Luxon-like datetime library
+    "asyncpg>=0.29.0",  # For PostgreSQL persistence
+    "python-dotenv>=1.0.0",  # For environment variables
 ]
 
 [project.optional-dependencies]

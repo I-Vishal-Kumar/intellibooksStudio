@@ -12,6 +12,7 @@ import asyncio
 import logging
 import re
 import sys
+import time
 from datetime import datetime
 from typing import Optional, Dict, Any, Tuple
 from uuid import uuid4
@@ -23,8 +24,17 @@ from ..connection_manager import manager
 
 logger = logging.getLogger(__name__)
 
+# Add intellibooks_db module to path for database access
+# __file__ = services/websocket/src/handlers/smart_handler.py
+# parent.parent.parent.parent = services/
+services_path = Path(__file__).parent.parent.parent.parent
+intellibooks_db_path = services_path / "intellibooks_db"
+if intellibooks_db_path.exists() and str(services_path) not in sys.path:
+    sys.path.insert(0, str(services_path))
+
 # Import agents with proper path resolution
-project_root = Path(__file__).parent.parent.parent.parent.parent
+# project_root = parent of services = audio-transcription/
+project_root = services_path.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
@@ -332,12 +342,61 @@ async def process_smart_message(
         )
 
 
+async def persist_message(
+    session_id: str,
+    message_id: str,
+    role: str,
+    content: str,
+    sources: list = None,
+    intent: str = None,
+    intent_confidence: float = None,
+    rag_used: bool = False,
+    processing_time_ms: float = None,
+    metadata: dict = None,
+) -> bool:
+    """Persist a message to the database if available."""
+    try:
+        from intellibooks_db.database import get_db_pool, MessageRepository, SessionRepository
+
+        pool = await get_db_pool()
+        if not pool:
+            return False
+
+        # Ensure session exists
+        session_repo = SessionRepository(pool)
+        await session_repo.get_or_create(session_id)
+
+        # Save message
+        message_repo = MessageRepository(pool)
+        result = await message_repo.create(
+            message_id=message_id,
+            session_id=session_id,
+            role=role,
+            content=content,
+            sources=sources,
+            intent=intent,
+            intent_confidence=intent_confidence,
+            rag_used=rag_used,
+            processing_time_ms=processing_time_ms,
+            metadata=metadata,
+        )
+        return result is not None
+    except ImportError:
+        logger.debug("Database module not available for message persistence")
+        return False
+    except Exception as e:
+        logger.error(f"Failed to persist message: {e}")
+        return False
+
+
 async def handle_smart_message(
     websocket,
     message_data: dict,
     session_id: str,
 ) -> Optional[ChatResponse]:
     """Handle an incoming message with smart routing."""
+    start_time = time.time()
+
     try:
         # Validate message
         message_data["session_id"] = session_id
@@ -346,8 +405,40 @@ async def handle_smart_message(
 
         chat_message = ChatMessage(**message_data)
 
+        # Persist user message
+        user_message_id = f"user-{int(time.time() * 1000)}-{uuid4().hex[:8]}"
+        await persist_message(
+            session_id=session_id,
+            message_id=user_message_id,
+            role="user",
+            content=chat_message.content,
+        )
+
         # Process with smart handler
         response = await process_smart_message(chat_message, websocket)
+
+        # Calculate processing time
+        processing_time_ms = (time.time() - start_time) * 1000
+
+        # Persist assistant response
+        if response:
+            sources = response.metadata.get("sources", []) if response.metadata else []
+            intent = response.metadata.get("detected_intent") if response.metadata else None
+            intent_confidence = response.metadata.get("intent_confidence") if response.metadata else None
+            rag_used = response.metadata.get("rag_used", False) if response.metadata else False
+
+            await persist_message(
+                session_id=session_id,
+                message_id=response.message_id,
+                role="assistant",
+                content=response.content,
+                sources=sources,
+                intent=intent,
+                intent_confidence=intent_confidence,
+                rag_used=rag_used,
+                processing_time_ms=processing_time_ms,
+                metadata=response.metadata,
+            )
 
         return response
 

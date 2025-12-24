@@ -58,7 +58,29 @@
       "Bash(\"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\.venv\\\\Scripts\\\\pip.exe\" install -e \"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\services\\\\websocket[dev]\")",
       "Bash(\"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\.venv\\\\Scripts\\\\pip.exe\" show ray)",
       "Bash(docker exec:*)",
-      "Bash(\"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\.venv\\\\Scripts\\\\pip.exe\" install ray[client]==2.52.0)"
+      "Bash(\"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\.venv\\\\Scripts\\\\pip.exe\" install ray[client]==2.52.0)",
+      "Bash(find:*)",
+      "Bash(pip show:*)",
+      "Bash(.venvScriptspip.exe show shared)",
+      "Bash(\".venv\\\\Scripts\\\\pip.exe\" show shared)",
+      "Bash(move:*)",
+      "Bash(.venvScriptspython.exe -c \"import asyncio; import asyncpg; async def test\\(\\): pool = await asyncpg.create_pool\\(host=''localhost'', port=5432, database=''intellibooks'', user=''admin'', password=''devpassword123''\\); async with pool.acquire\\(\\) as conn: print\\(await conn.fetchval\\(''SELECT 1''\\)\\); await pool.close\\(\\); asyncio.run\\(test\\(\\)\\)\")",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\":*)",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\" -c \"import asyncio; import asyncpg; exec\\(''''''\nasync def test\\(\\):\n    pool = await asyncpg.create_pool\\(host=\"\"localhost\"\", port=5432, database=\"\"intellibooks\"\", user=\"\"admin\"\", password=\"\"devpassword123\"\"\\)\n    async with pool.acquire\\(\\) as conn:\n        print\\(await conn.fetchval\\(\"\"SELECT 1\"\"\\)\\)\n    await pool.close\\(\\)\nasyncio.run\\(test\\(\\)\\)\n''''''\\)\")",
+      "Bash(docker run:*)",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\" -c \"import asyncio; import asyncpg; exec\\(''''''\nasync def test\\(\\):\n    pool = await asyncpg.create_pool\\(host=\"\"localhost\"\", port=5432, database=\"\"intellibooks\"\", user=\"\"admin\"\", password=\"\"devpassword123\"\"\\)\n    async with pool.acquire\\(\\) as conn:\n        print\\(\"\"Connected! Result:\"\", await conn.fetchval\\(\"\"SELECT 1\"\"\\)\\)\n    await pool.close\\(\\)\nasyncio.run\\(test\\(\\)\\)\n''''''\\)\")",
+      "Bash(docker restart:*)",
+      "Bash(timeout /t 5 /nobreak)",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\" -c \"import asyncio; import asyncpg; exec\\(''''''\nasync def test\\(\\):\n    pool = await asyncpg.create_pool\\(host=\"\"127.0.0.1\"\", port=5432, database=\"\"intellibooks\"\", user=\"\"admin\"\", password=\"\"devpassword123\"\"\\)\n    async with pool.acquire\\(\\) as conn:\n        print\\(\"\"Connected! Result:\"\", await conn.fetchval\\(\"\"SELECT 1\"\"\\)\\)\n    await pool.close\\(\\)\nasyncio.run\\(test\\(\\)\\)\n''''''\\)\")",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\" -c \"import asyncio; import asyncpg; exec\\(''''''\nasync def test\\(\\):\n    pool = await asyncpg.create_pool\\(host=\"\"127.0.0.1\"\", port=5432, database=\"\"intellibooks\"\", user=\"\"admin\"\"\\)\n    async with pool.acquire\\(\\) as conn:\n        print\\(\"\"Connected! Result:\"\", await conn.fetchval\\(\"\"SELECT 1\"\"\\)\\)\n    await pool.close\\(\\)\nasyncio.run\\(test\\(\\)\\)\n''''''\\)\")",
+      "Bash(tasklist:*)",
+      "Bash(timeout 30 bash:*)",
+      "Bash(timeout /t 8 /nobreak)",
+      "Bash(ping:*)",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\" -m uvicorn:*)",
+      "Bash(timeout /t 2 /nobreak)",
+      "Bash(pnpm build)",
+      "Bash(del \"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\nul\")"
     ]
   }
 }
