@@ -19,18 +19,7 @@ import AudioView from "@/components/dashboard_v2/AudioView";
 import VideoView from "@/components/dashboard_v2/VideoView";
 import InfographicView from "@/components/dashboard_v2/InfographicView";
 import SlideDeckView from "@/components/dashboard_v2/SlideDeckView";
-import { WebSocketProvider, useWebSocketContext } from "@/lib/websocket";
 import dummyData from "../../dummy_data/dummy_data.json";
-import {
-    listSessions,
-    createSession,
-    updateSessionTitle,
-    uploadDocument,
-    deleteDocument as deleteDocumentAPI,
-    generateSessionId,
-    Session as APISession,
-    fetchDocuments,
-} from "@/lib/api/sessions";
 
 // RAG API Configuration
 const RAG_API_URL = process.env.NEXT_PUBLIC_RAG_API_URL || "http://localhost:8002";
@@ -70,15 +59,7 @@ interface RAGStats {
     status: string;
 }
 
-// Inner component that uses WebSocket context
-function KnowledgePageContent({
-    currentSessionId,
-    onSessionChange,
-}: {
-    currentSessionId: string | null;
-    onSessionChange: (id: string) => void;
-}) {
-    const wsContext = useWebSocketContext();
+export default function KnowledgePage() {
     const { isSignedIn, isLoaded, user } = useUser();
     const router = useRouter();
 
@@ -104,15 +85,10 @@ function KnowledgePageContent({
     const [customizationType, setCustomizationType] = useState('');
     const [pendingGeneration, setPendingGeneration] = useState<string | undefined>(undefined);
 
-    // Session State (NotebookLM-style persistence)
-    const [sessions, setSessions] = useState<APISession[]>([]);
-    const [persistenceEnabled, setPersistenceEnabled] = useState(false);
-
-    // Use session ID from props (managed by outer component)
-    const setCurrentSessionId = onSessionChange;
-
     // RAG State
     const [documents, setDocuments] = useState<Document[]>([]);
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [isQuerying, setIsQuerying] = useState(false);
     const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);
     const [stats, setStats] = useState<RAGStats | null>(null);
     const [notebookTitle, setNotebookTitle] = useState("Knowledge Base");
@@ -126,55 +102,6 @@ function KnowledgePageContent({
         }
     }, [isLoaded, isSignedIn, router]);
 
-    // Initialize sessions and load documents from DB on mount
-    useEffect(() => {
-        const initializeSessions = async () => {
-            try {
-                // Try to fetch existing sessions
-                const response = await listSessions();
-                setSessions(response.sessions);
-                setPersistenceEnabled(response.persistence_enabled);
-
-                if (response.sessions.length > 0) {
-                    // Use the most recent session
-                    const latestSession = response.sessions[0];
-                    setCurrentSessionId(latestSession.session_id);
-                    setNotebookTitle(latestSession.title || "Knowledge Base");
-
-                    // Load documents for this session from the database
-                    const docs = await fetchDocuments(latestSession.session_id);
-                    if (docs.length > 0) {
-                        setDocuments(docs.map(doc => ({
-                            id: doc.document_id,
-                            filename: doc.filename,
-                            chunks: doc.chunks_count || 0,
-                            uploadedAt: new Date(doc.created_at || Date.now()),
-                            status: doc.status as "processing" | "ready" | "error",
-                        })));
-                    }
-                } else {
-                    // Create a new session
-                    const localSessionId = generateSessionId();
-                    setCurrentSessionId(localSessionId);
-                    try {
-                        await createSession("New Notebook", localSessionId);
-                    } catch (e) {
-                        console.error("Failed to create initial session:", e);
-                    }
-                }
-            } catch (error) {
-                console.error("Failed to initialize sessions:", error);
-                // Fallback: generate a local session ID
-                const localSessionId = generateSessionId();
-                setCurrentSessionId(localSessionId);
-            }
-        };
-
-        if (isLoaded && isSignedIn) {
-            initializeSessions();
-        }
-    }, [isLoaded, isSignedIn]);
-
     // Fetch RAG stats on mount
     useEffect(() => {
         fetchStats();
@@ -186,12 +113,8 @@ function KnowledgePageContent({
             const firstDoc = documents[0];
             const name = firstDoc.filename.replace(/\.[^/.]+$/, ""); // Remove extension
             setNotebookTitle(name);
-            // Update title in database if we have a session
-            if (currentSessionId && persistenceEnabled) {
-                updateSessionTitle(currentSessionId, name).catch(console.error);
-            }
         }
-    }, [documents, notebookTitle, currentSessionId, persistenceEnabled]);
+    }, [documents, notebookTitle]);
 
     const fetchStats = async () => {
         try {
@@ -203,20 +126,8 @@ function KnowledgePageContent({
         }
     };
 
-    // File upload handler - now includes session ID for persistence
+    // File upload handler
     const handleFileUpload = async (files: File[]) => {
-        // Ensure we have a session ID
-        let sessionId = currentSessionId;
-        if (!sessionId) {
-            sessionId = generateSessionId();
-            setCurrentSessionId(sessionId);
-            try {
-                await createSession("New Notebook", sessionId);
-            } catch (e) {
-                console.error("Failed to create session:", e);
-            }
-        }
-
         const newProgress: UploadProgress[] = files.map((f) => ({
             filename: f.name,
             progress: 0,
@@ -225,6 +136,9 @@ function KnowledgePageContent({
         setUploadProgress((prev) => [...prev, ...newProgress]);
 
         const uploadPromises = files.map(async (file) => {
+            const formData = new FormData();
+            formData.append("file", file);
+
             try {
                 setUploadProgress((prev) =>
                     prev.map((p) =>
@@ -232,8 +146,12 @@ function KnowledgePageContent({
                     )
                 );
 
-                // Use the API client which includes session_id
-                const result = await uploadDocument(file, sessionId!);
+                const response = await fetch(`${RAG_API_URL}/api/rag/upload`, {
+                    method: "POST",
+                    body: formData,
+                });
+
+                const result = await response.json();
 
                 if (result.success) {
                     setUploadProgress((prev) =>
@@ -254,46 +172,6 @@ function KnowledgePageContent({
                         },
                         ...prev,
                     ]);
-
-                    // Generate and display document summary in chat via WebSocket context
-                    try {
-                        const summaryResponse = await fetch(`${RAG_API_URL}/api/rag/document-summary`, {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ document_id: result.document_id }),
-                        });
-                        const summaryResult = await summaryResponse.json();
-
-                        if (summaryResult.success && summaryResult.summary) {
-                            const summaryMessage = {
-                                id: `summary-${result.document_id}`,
-                                role: "assistant" as const,
-                                content: `📄 **${file.name}** uploaded successfully!\n\n**Summary:** ${summaryResult.summary}\n\n_${result.chunks_created} chunks indexed. You can now ask questions about this document._`,
-                                timestamp: new Date(),
-                            };
-                            // Add to WebSocket context so ChatPanel sees it
-                            wsContext.addMessage(summaryMessage);
-                        } else {
-                            // Summary failed but upload succeeded - show basic message
-                            const basicMessage = {
-                                id: `upload-${result.document_id}`,
-                                role: "assistant" as const,
-                                content: `📄 **${file.name}** uploaded successfully! ${result.chunks_created} chunks indexed. You can now ask questions about this document.`,
-                                timestamp: new Date(),
-                            };
-                            wsContext.addMessage(basicMessage);
-                        }
-                    } catch (summaryError) {
-                        console.error("Failed to generate summary:", summaryError);
-                        // Still show a basic success message
-                        const basicMessage = {
-                            id: `upload-${result.document_id}`,
-                            role: "assistant" as const,
-                            content: `📄 **${file.name}** uploaded successfully! ${result.chunks_created} chunks indexed. You can now ask questions about this document.`,
-                            timestamp: new Date(),
-                        };
-                        wsContext.addMessage(basicMessage);
-                    }
                 } else {
                     throw new Error(result.error || "Upload failed");
                 }
@@ -320,18 +198,6 @@ function KnowledgePageContent({
     const handleTextUpload = async (content: string, type: 'text' | 'website' | 'youtube') => {
         const filename = type === 'text' ? 'Pasted Text' : content.substring(0, 50) + '...';
 
-        // Ensure we have a session ID
-        let sessionId = currentSessionId;
-        if (!sessionId) {
-            sessionId = generateSessionId();
-            setCurrentSessionId(sessionId);
-            try {
-                await createSession("New Notebook", sessionId);
-            } catch (e) {
-                console.error("Failed to create session:", e);
-            }
-        }
-
         setUploadProgress((prev) => [...prev, {
             filename,
             progress: 0,
@@ -345,11 +211,19 @@ function KnowledgePageContent({
                 )
             );
 
-            // Create a text blob and upload it
+            // For now, we'll create a text blob and upload it
             const blob = new Blob([content], { type: 'text/plain' });
             const file = new File([blob], `${type}_content_${Date.now()}.txt`, { type: 'text/plain' });
 
-            const result = await uploadDocument(file, sessionId!);
+            const formData = new FormData();
+            formData.append("file", file);
+
+            const response = await fetch(`${RAG_API_URL}/api/rag/upload`, {
+                method: "POST",
+                body: formData,
+            });
+
+            const result = await response.json();
 
             if (result.success) {
                 setUploadProgress((prev) =>
@@ -370,35 +244,6 @@ function KnowledgePageContent({
                     },
                     ...prev,
                 ]);
-
-                // Generate and display content summary in chat via WebSocket context
-                try {
-                    const summaryResponse = await fetch(`${RAG_API_URL}/api/rag/document-summary`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ document_id: result.document_id }),
-                    });
-                    const summaryResult = await summaryResponse.json();
-
-                    if (summaryResult.success && summaryResult.summary) {
-                        const summaryMessage = {
-                            id: `summary-${result.document_id}`,
-                            role: "assistant" as const,
-                            content: `📄 **${filename}** added successfully!\n\n**Summary:** ${summaryResult.summary}\n\n_${result.chunks_created} chunks indexed. You can now ask questions about this content._`,
-                            timestamp: new Date(),
-                        };
-                        wsContext.addMessage(summaryMessage);
-                    }
-                } catch (summaryError) {
-                    console.error("Failed to generate summary:", summaryError);
-                    const basicMessage = {
-                        id: `upload-${result.document_id}`,
-                        role: "assistant" as const,
-                        content: `📄 **${filename}** added successfully! ${result.chunks_created} chunks indexed. You can now ask questions about this content.`,
-                        timestamp: new Date(),
-                    };
-                    wsContext.addMessage(basicMessage);
-                }
             } else {
                 throw new Error(result.error || "Upload failed");
             }
@@ -418,16 +263,48 @@ function KnowledgePageContent({
         }, 3000);
     };
 
-    // RAG Query handler - uses WebSocket for smart handler processing
-    const handleQuery = (query: string) => {
-        if (!query.trim()) return;
+    // RAG Query handler
+    const handleQuery = async (query: string) => {
+        if (!query.trim() || isQuerying) return;
 
-        // Use WebSocket's sendMessage - it goes through smart handler
-        // which auto-detects intent (general_chat vs knowledge_query)
-        if (wsContext.isConnected && currentSessionId) {
-            wsContext.sendMessage(query.trim(), currentSessionId);
-        } else {
-            console.warn("WebSocket not connected, cannot send query");
+        const userMessage: Message = {
+            id: Date.now().toString(),
+            role: "user",
+            content: query.trim(),
+            timestamp: new Date(),
+        };
+
+        setMessages((prev) => [...prev, userMessage]);
+        setIsQuerying(true);
+
+        try {
+            const response = await fetch(`${RAG_API_URL}/api/rag/query`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ query: query.trim(), top_k: 5 }),
+            });
+
+            const result = await response.json();
+
+            const assistantMessage: Message = {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: result.answer,
+                timestamp: new Date(),
+                sources: result.sources,
+            };
+
+            setMessages((prev) => [...prev, assistantMessage]);
+        } catch (error) {
+            const errorMessage: Message = {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: "Sorry, I encountered an error while querying the knowledge base. Please try again.",
+                timestamp: new Date(),
+            };
+            setMessages((prev) => [...prev, errorMessage]);
+        } finally {
+            setIsQuerying(false);
         }
     };
 
@@ -442,39 +319,20 @@ function KnowledgePageContent({
         }
     };
 
-    // Clear session documents only
+    // Clear all documents
     const handleClearAll = async () => {
-        if (!confirm("Are you sure you want to clear all documents from this session?")) {
+        if (!confirm("Are you sure you want to clear all documents from the knowledge base?")) {
             return;
         }
 
         try {
             await fetch(`${RAG_API_URL}/api/rag/clear`, { method: "DELETE" });
             setDocuments([]);
+            setMessages([]);
             setNotebookTitle("Knowledge Base");
             fetchStats();
         } catch (error) {
             console.error("Failed to clear knowledge base:", error);
-        }
-    };
-
-    // Clear entire knowledge base (all ChromaDB data)
-    const handleClearKnowledgeBase = async () => {
-        try {
-            const response = await fetch(`${RAG_API_URL}/api/rag/clear`, { method: "DELETE" });
-            if (!response.ok) {
-                throw new Error("Failed to clear knowledge base");
-            }
-            // Clear local state as well
-            setDocuments([]);
-            setNotebookTitle("Knowledge Base");
-            // Refresh sessions list
-            const sessionsResponse = await listSessions();
-            setSessions(sessionsResponse.sessions);
-            fetchStats();
-        } catch (error) {
-            console.error("Failed to clear knowledge base:", error);
-            throw error; // Re-throw so the UI can show error state
         }
     };
 
@@ -593,7 +451,6 @@ function KnowledgePageContent({
                             uploadProgress={uploadProgress}
                             onDeleteSource={handleDeleteDocument}
                             onClearAll={handleClearAll}
-                            onClearKnowledgeBase={handleClearKnowledgeBase}
                             stats={stats}
                         />
                     </div>
@@ -607,6 +464,9 @@ function KnowledgePageContent({
                             hasSources={hasSources}
                             onUploadClick={() => setShowUploadModal(true)}
                             isUploading={isUploading}
+                            messages={messages}
+                            onSendMessage={handleQuery}
+                            isQuerying={isQuerying}
                             stats={stats}
                         />
                     </div>
@@ -636,12 +496,6 @@ function KnowledgePageContent({
                             pendingGenerationLabel={pendingGeneration}
                             hasSources={hasSources}
                             data={dummyData}
-                            onMindMapNodeClick={(nodeLabel: string, nodeData: any) => {
-                                // Send a contextual query to chat about the clicked node
-                                const rootContext = nodeData?.rootLabel || 'the knowledge base';
-                                const query = `Discuss what these sources say about ${nodeLabel}, in the larger context of ${rootContext}.`;
-                                handleQuery(query);
-                            }}
                         />
                     </div>
                 </div>
@@ -649,17 +503,7 @@ function KnowledgePageContent({
 
             {/* Modals */}
             {showArchitecture && (
-                <ArchitectureView
-                    onClose={() => setShowArchitecture(false)}
-                    onNodeClick={(nodeId: string, nodeData: any) => {
-                        // Send a contextual query to chat about the clicked node
-                        const nodeLabel = nodeData?.label || nodeId;
-                        const rootContext = nodeData?.rootLabel || 'the knowledge base';
-                        const query = `Discuss what these sources say about ${nodeLabel}, in the larger context of ${rootContext}.`;
-                        handleQuery(query);
-                        setShowArchitecture(false); // Close modal after clicking
-                    }}
-                />
+                <ArchitectureView onClose={() => setShowArchitecture(false)} />
             )}
 
             {showFlashcards && (
@@ -696,19 +540,47 @@ function KnowledgePageContent({
             )}
 
             {showAudio && (
-                <AudioView onClose={() => setShowAudio(false)} />
+                <div className="fixed inset-0 z-[300] bg-white animate-in zoom-in-95 duration-300">
+                    <div className="absolute top-6 right-6 z-[310]">
+                        <button onClick={() => setShowAudio(false)} className="p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-colors">
+                            <Icons.Minimize2 size={24} />
+                        </button>
+                    </div>
+                    <AudioView isModal={true} />
+                </div>
             )}
 
             {showVideo && (
-                <VideoView onClose={() => setShowVideo(false)} />
+                <div className="fixed inset-0 z-[300] bg-white animate-in zoom-in-95 duration-300">
+                    <div className="absolute top-6 right-6 z-[310]">
+                        <button onClick={() => setShowVideo(false)} className="p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-colors">
+                            <Icons.Minimize2 size={24} />
+                        </button>
+                    </div>
+                    <VideoView isModal={true} />
+                </div>
             )}
 
             {showInfographic && (
-                <InfographicView onClose={() => setShowInfographic(false)} />
+                <div className="fixed inset-0 z-[300] bg-white animate-in zoom-in-95 duration-300">
+                    <div className="absolute top-6 right-6 z-[310]">
+                        <button onClick={() => setShowInfographic(false)} className="p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-colors">
+                            <Icons.Minimize2 size={24} />
+                        </button>
+                    </div>
+                    <InfographicView isModal={true} />
+                </div>
             )}
 
             {showSlideDeck && (
-                <SlideDeckView onClose={() => setShowSlideDeck(false)} />
+                <div className="fixed inset-0 z-[300] bg-white animate-in zoom-in-95 duration-300">
+                    <div className="absolute top-6 right-6 z-[310]">
+                        <button onClick={() => setShowSlideDeck(false)} className="p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-colors">
+                            <Icons.Minimize2 size={24} />
+                        </button>
+                    </div>
+                    <SlideDeckView isModal={true} />
+                </div>
             )}
 
             {showCustomization && (
@@ -727,45 +599,5 @@ function KnowledgePageContent({
                 />
             )}
         </div>
-    );
-}
-
-// Main component that wraps everything with WebSocketProvider
-export default function KnowledgePage() {
-    const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-    const { isSignedIn, isLoaded } = useUser();
-    const router = useRouter();
-
-    // Generate initial session ID
-    useEffect(() => {
-        if (!currentSessionId) {
-            const newSessionId = generateSessionId();
-            setCurrentSessionId(newSessionId);
-        }
-    }, [currentSessionId]);
-
-    // Redirect if not signed in
-    useEffect(() => {
-        if (isLoaded && !isSignedIn) {
-            router.push("/sign-in");
-        }
-    }, [isLoaded, isSignedIn, router]);
-
-    // Show loading until we have a session ID
-    if (!currentSessionId) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50">
-                <div className="animate-pulse">Loading...</div>
-            </div>
-        );
-    }
-
-    return (
-        <WebSocketProvider sessionId={currentSessionId}>
-            <KnowledgePageContent
-                currentSessionId={currentSessionId}
-                onSessionChange={setCurrentSessionId}
-            />
-        </WebSocketProvider>
     );
 }

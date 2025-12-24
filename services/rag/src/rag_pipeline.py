@@ -311,10 +311,10 @@ class ChromaDBHttpClient:
 
     def delete_collection(self, collection_name: str):
         """Delete entire collection."""
-        # ChromaDB v2 API requires collection NAME for deletion, not UUID
+        collection_id = self._get_collection_id(collection_name)
         self._request(
             "DELETE",
-            f"{self._api_base()}/collections/{collection_name}"
+            f"{self._api_base()}/collections/{collection_id}"
         )
         # Clear from cache
         self._collection_ids.pop(collection_name, None)
@@ -601,11 +601,6 @@ class ChromaDBStore:
             _ = self.collection_name
             return True
         except Exception as e:
-            # If collection doesn't exist (404), that's fine - it's already "cleared"
-            if "404" in str(e) or "Not Found" in str(e):
-                logger.info(f"Collection doesn't exist, nothing to clear")
-                self._collection_id = None
-                return True
             logger.error(f"Failed to clear collection: {e}")
             return False
 

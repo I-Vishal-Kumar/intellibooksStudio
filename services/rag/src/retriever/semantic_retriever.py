@@ -24,7 +24,7 @@ class SemanticRetriever:
         self,
         vector_store: ChromaVectorStore,
         default_top_k: int = 5,
-        min_score_threshold: float = 0.05,  # Lowered from 0.5 - ChromaDB returns lower scores
+        min_score_threshold: float = 0.5,
     ):
         self.vector_store = vector_store
         self.default_top_k = default_top_k

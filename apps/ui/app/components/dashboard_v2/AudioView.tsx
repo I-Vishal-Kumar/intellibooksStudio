@@ -4,7 +4,6 @@ import { Play, Pause, SkipBack, SkipForward, Volume2, Share2, Download, Maximize
 interface AudioViewProps {
     onExpand?: () => void;
     isModal?: boolean;
-    onClose?: () => void;
 }
 
 const AudioView: React.FC<AudioViewProps> = ({ onExpand, isModal }) => {

@@ -23,8 +23,6 @@ interface WebSocketContextValue {
   setSessionId: (id: string | null) => void;
   // Processing status for UI feedback
   processingStatus: ProcessingStatus | null;
-  // Add a message to the chat programmatically (e.g., for summaries after upload)
-  addMessage: (message: Message) => void;
 }
 
 const WebSocketContext = createContext<WebSocketContextValue | undefined>(undefined);
@@ -221,16 +219,6 @@ export function WebSocketProvider({
     [sessionId, onSessionIdChange]
   );
 
-  // Add a message to the chat programmatically (e.g., for document summaries)
-  const addMessage = useCallback((message: Message) => {
-    setMessages((prev) => {
-      // Prevent duplicates
-      const exists = prev.some((msg) => msg.id === message.id);
-      if (exists) return prev;
-      return [...prev, message];
-    });
-  }, []);
-
   // Initialize session ID if not provided
   useEffect(() => {
     if (!sessionId && !initialSessionId) {
@@ -252,7 +240,6 @@ export function WebSocketProvider({
     sessionId,
     setSessionId,
     processingStatus,
-    addMessage,
   };
 
   return <WebSocketContext.Provider value={value}>{children}</WebSocketContext.Provider>;

@@ -2,12 +2,8 @@
 
 import json
 import logging
-import sys
-from pathlib import Path
-from typing import Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Body
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -27,54 +23,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Add intellibooks_db module to path
-# __file__ = services/websocket/src/main.py
-# parent.parent.parent = services/
-services_path = Path(__file__).parent.parent.parent
-intellibooks_db_path = services_path / "intellibooks_db"
-if intellibooks_db_path.exists() and str(services_path) not in sys.path:
-    sys.path.insert(0, str(services_path))
-    logger.info(f"Added {services_path} to sys.path for intellibooks_db")
-
 settings = get_settings()
-
-# Global database instances
-db_pool = None
-session_repo = None
-message_repo = None
-document_repo = None
-
-
-# Request/Response models
-class CreateSessionRequest(BaseModel):
-    session_id: Optional[str] = None
-    title: str = "New Notebook"
-
-
-class UpdateSessionRequest(BaseModel):
-    title: str
-
-
-async def init_database():
-    """Initialize database connection and repositories."""
-    global db_pool, session_repo, message_repo, document_repo
-
-    try:
-        from intellibooks_db.database import get_db_pool, ensure_schema, SessionRepository, MessageRepository, DocumentRepository
-
-        db_pool = await get_db_pool()
-        if db_pool:
-            await ensure_schema()
-            session_repo = SessionRepository(db_pool)
-            message_repo = MessageRepository(db_pool)
-            document_repo = DocumentRepository(db_pool)
-            logger.info("✅ PostgreSQL persistence enabled for WebSocket service")
-        else:
-            logger.warning("⚠️ Running without PostgreSQL persistence")
-    except ImportError as e:
-        logger.warning(f"Database module not available: {e}")
-    except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
 
 
 @asynccontextmanager
@@ -83,12 +32,9 @@ async def lifespan(app: FastAPI):
     import asyncio
     from .utils.redis_client import get_redis_client, close_redis_client
     from .utils.background_processor import check_abrupt_endings
-
+    
     logger.info(f"Starting {settings.service_name} on {settings.host}:{settings.port}")
-
-    # Initialize database connection
-    await init_database()
-
+    
     # Initialize Redis connection
     if settings.redis_enabled:
         try:
@@ -96,7 +42,7 @@ async def lifespan(app: FastAPI):
             logger.info("Redis connection established")
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
-
+    
     # Start background task for abrupt end detection
     async def check_abrupt_ends_periodically():
         while True:
@@ -105,26 +51,21 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"Error checking abrupt endings: {e}")
             await asyncio.sleep(30)  # Check every 30 seconds
-
+    
     abrupt_end_task = asyncio.create_task(check_abrupt_ends_periodically())
-
+    
     yield
-
+    
     # Cleanup
     abrupt_end_task.cancel()
     try:
         await abrupt_end_task
     except asyncio.CancelledError:
         pass
-
+    
     if settings.redis_enabled:
         await close_redis_client()
-
-    # Close database connection
-    if db_pool:
-        from intellibooks_db.database import close_db_pool
-        await close_db_pool()
-
+    
     logger.info(f"Shutting down {settings.service_name}")
 
 
@@ -169,172 +110,16 @@ async def health_check():
 
 @app.get("/api/sessions")
 async def list_sessions():
-    """List all sessions (from database if available, otherwise active WebSocket sessions)."""
-    # Get active WebSocket sessions
-    active_sessions = manager.get_all_sessions()
-
-    # If we have database persistence, return persisted sessions
-    if session_repo:
-        db_sessions = await session_repo.list_all()
-        return {
-            "sessions": [
-                {
-                    "session_id": session["session_id"],
-                    "title": session["title"],
-                    "document_count": session.get("document_count", 0),
-                    "message_count": session.get("message_count", 0),
-                    "is_active": session["is_active"],
-                    "connections": manager.get_session_connections_count(session["session_id"]),
-                    "created_at": session["created_at"].isoformat() if session.get("created_at") else None,
-                    "updated_at": session["updated_at"].isoformat() if session.get("updated_at") else None,
-                    "last_message_at": session["last_message_at"].isoformat() if session.get("last_message_at") else None,
-                }
-                for session in db_sessions
-            ],
-            "persistence_enabled": True,
-        }
-
-    # Fallback to WebSocket sessions only
+    """List all active sessions."""
+    sessions = manager.get_all_sessions()
     return {
         "sessions": [
             {
                 "session_id": session_id,
                 "connections": manager.get_session_connections_count(session_id),
             }
-            for session_id in active_sessions
-        ],
-        "persistence_enabled": False,
-    }
-
-
-@app.post("/api/sessions")
-async def create_session(request: CreateSessionRequest):
-    """Create a new chat session (notebook)."""
-    import time
-
-    session_id = request.session_id or f"session-{int(time.time() * 1000)}"
-
-    if session_repo:
-        session = await session_repo.create(session_id, request.title)
-        if session:
-            return {
-                "success": True,
-                "session_id": session["session_id"],
-                "title": session["title"],
-                "created_at": session["created_at"].isoformat() if session.get("created_at") else None,
-            }
-        raise HTTPException(status_code=500, detail="Failed to create session")
-
-    # No persistence - just return the session_id
-    return {
-        "success": True,
-        "session_id": session_id,
-        "title": request.title,
-        "persisted": False,
-    }
-
-
-@app.get("/api/sessions/{session_id}")
-async def get_session(session_id: str, include_messages: bool = False):
-    """Get session details with optional message history."""
-    if not session_repo:
-        raise HTTPException(status_code=503, detail="Session persistence not enabled")
-
-    session = await session_repo.get_by_session_id(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    result = {
-        "session_id": session["session_id"],
-        "title": session["title"],
-        "document_count": session.get("document_count", 0),
-        "message_count": session.get("message_count", 0),
-        "is_active": session["is_active"],
-        "connections": manager.get_session_connections_count(session_id),
-        "created_at": session["created_at"].isoformat() if session.get("created_at") else None,
-        "updated_at": session["updated_at"].isoformat() if session.get("updated_at") else None,
-    }
-
-    # Include messages if requested
-    if include_messages and message_repo:
-        messages = await message_repo.get_by_session(session_id)
-        result["messages"] = [
-            {
-                "message_id": msg["message_id"],
-                "role": msg["role"],
-                "content": msg["content"],
-                "sources": msg.get("sources", []),
-                "intent": msg.get("intent"),
-                "rag_used": msg.get("rag_used", False),
-                "created_at": msg["created_at"].isoformat() if msg.get("created_at") else None,
-            }
-            for msg in messages
+            for session_id in sessions
         ]
-
-    # Include documents if available
-    if document_repo:
-        documents = await document_repo.get_by_session(session_id)
-        result["documents"] = [
-            {
-                "document_id": doc["document_id"],
-                "filename": doc["filename"],
-                "file_type": doc["file_type"],
-                "chunks_count": doc["chunks_count"],
-                "status": doc["status"],
-                "created_at": doc["created_at"].isoformat() if doc.get("created_at") else None,
-            }
-            for doc in documents
-        ]
-
-    return result
-
-
-@app.put("/api/sessions/{session_id}")
-async def update_session(session_id: str, request: UpdateSessionRequest):
-    """Update session title."""
-    if not session_repo:
-        raise HTTPException(status_code=503, detail="Session persistence not enabled")
-
-    success = await session_repo.update_title(session_id, request.title)
-    if not success:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    return {"success": True, "session_id": session_id, "title": request.title}
-
-
-@app.delete("/api/sessions/{session_id}")
-async def delete_session(session_id: str):
-    """Delete a session and all its messages/documents."""
-    if not session_repo:
-        raise HTTPException(status_code=503, detail="Session persistence not enabled")
-
-    success = await session_repo.delete(session_id)
-    return {"success": success, "session_id": session_id}
-
-
-@app.get("/api/sessions/{session_id}/messages")
-async def get_session_messages(session_id: str, limit: int = 100, offset: int = 0):
-    """Get messages for a session."""
-    if not message_repo:
-        raise HTTPException(status_code=503, detail="Message persistence not enabled")
-
-    messages = await message_repo.get_by_session(session_id, limit=limit, offset=offset)
-    return {
-        "session_id": session_id,
-        "messages": [
-            {
-                "message_id": msg["message_id"],
-                "role": msg["role"],
-                "content": msg["content"],
-                "sources": msg.get("sources", []),
-                "intent": msg.get("intent"),
-                "rag_used": msg.get("rag_used", False),
-                "processing_time_ms": msg.get("processing_time_ms"),
-                "created_at": msg["created_at"].isoformat() if msg.get("created_at") else None,
-            }
-            for msg in messages
-        ],
-        "total": len(messages),
     }
 
 

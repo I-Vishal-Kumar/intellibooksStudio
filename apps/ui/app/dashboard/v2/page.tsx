@@ -20,7 +20,6 @@ import VideoView from "@/components/dashboard_v2/VideoView";
 import InfographicView from "@/components/dashboard_v2/InfographicView";
 import SlideDeckView from "@/components/dashboard_v2/SlideDeckView";
 import { WebSocketProvider } from "@/lib/websocket";
-import ShareModal from "@/components/dashboard_v2/ShareModal";
 import {
     listSessions,
     getSession,
@@ -171,11 +170,6 @@ export default function DashboardV2() {
     const [customizationType, setCustomizationType] = useState('');
     const [pendingGeneration, setPendingGeneration] = useState<string | undefined>(undefined);
 
-    // Session State (NotebookLM-style)
-    const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-    const [sessions, setSessions] = useState<APISession[]>([]);
-    const [persistenceEnabled, setPersistenceEnabled] = useState(false);
-
     // RAG State
     const [documents, setDocuments] = useState<Document[]>([]);
     const [messages, setMessages] = useState<Message[]>([]);
@@ -193,92 +187,19 @@ export default function DashboardV2() {
         }
     }, [isLoaded, isSignedIn, router]);
 
-    // Fetch sessions and initialize current session on mount
+    // Fetch RAG stats on mount
     useEffect(() => {
-        const initializeSession = async () => {
-            try {
-                // Fetch all sessions
-                const response = await listSessions();
-                setSessions(response.sessions);
-                setPersistenceEnabled(response.persistence_enabled);
-
-                // Check for session ID in URL
-                const urlSessionId = searchParams.get("session");
-
-                if (urlSessionId) {
-                    // Load session from URL
-                    await loadSession(urlSessionId);
-                } else if (response.sessions.length > 0) {
-                    // Load most recent session
-                    await loadSession(response.sessions[0].session_id);
-                } else {
-                    // Create new session
-                    const newSession = await createSession("New Notebook");
-                    setCurrentSessionId(newSession.session_id);
-                    setNotebookTitle(newSession.title || "New Notebook");
-                    setSessions([newSession as APISession]);
-                }
-            } catch (error) {
-                console.error("Failed to initialize sessions:", error);
-                // Fallback: generate a local session ID
-                const localSessionId = generateSessionId();
-                setCurrentSessionId(localSessionId);
-            }
-        };
-
-        initializeSession();
         fetchStats();
-    }, [searchParams]);
+    }, []);
 
-    // Load a session and its data
-    const loadSession = async (sessionId: string) => {
-        try {
-            const session = await getSession(sessionId, true);
-            setCurrentSessionId(sessionId);
-            setNotebookTitle(session.title || "Untitled Notebook");
-
-            // Load documents from session
-            if (session.documents) {
-                setDocuments(session.documents.map(doc => ({
-                    id: doc.document_id,
-                    filename: doc.filename,
-                    chunks: doc.chunks_count,
-                    uploadedAt: doc.created_at ? new Date(doc.created_at) : new Date(),
-                    status: doc.status as "processing" | "ready" | "error",
-                })));
-            }
-
-            // Load messages from session
-            if (session.messages) {
-                setMessages(session.messages.map(msg => ({
-                    id: msg.message_id,
-                    role: msg.role as "user" | "assistant",
-                    content: msg.content,
-                    timestamp: msg.created_at ? new Date(msg.created_at) : new Date(),
-                    sources: msg.sources,
-                })));
-            }
-        } catch (error) {
-            console.error("Failed to load session:", error);
-            // Create new session if load fails
-            const newSession = await createSession("New Notebook");
-            setCurrentSessionId(newSession.session_id);
-            setNotebookTitle(newSession.title || "New Notebook");
-        }
-    };
-
-    // Update notebook title based on first document (only if "Untitled")
+    // Update notebook title based on first document
     useEffect(() => {
         if (documents.length > 0 && notebookTitle === "Untitled Notebook") {
             const firstDoc = documents[0];
             const name = firstDoc.filename.replace(/\.[^/.]+$/, ""); // Remove extension
             setNotebookTitle(name);
-            // Update title in database if we have a session
-            if (currentSessionId && persistenceEnabled) {
-                updateSessionTitle(currentSessionId, name).catch(console.error);
-            }
         }
-    }, [documents, notebookTitle, currentSessionId, persistenceEnabled]);
+    }, [documents, notebookTitle]);
 
     const fetchStats = async () => {
         try {
@@ -290,20 +211,8 @@ export default function DashboardV2() {
         }
     };
 
-    // File upload handler - now includes session ID for persistence
+    // File upload handler
     const handleFileUpload = async (files: File[]) => {
-        // Ensure we have a session ID
-        let sessionId = currentSessionId;
-        if (!sessionId) {
-            sessionId = generateSessionId();
-            setCurrentSessionId(sessionId);
-            try {
-                await createSession("New Notebook", sessionId);
-            } catch (e) {
-                console.error("Failed to create session:", e);
-            }
-        }
-
         const newProgress: UploadProgress[] = files.map((f) => ({
             filename: f.name,
             progress: 0,
@@ -312,6 +221,9 @@ export default function DashboardV2() {
         setUploadProgress((prev) => [...prev, ...newProgress]);
 
         const uploadPromises = files.map(async (file) => {
+            const formData = new FormData();
+            formData.append("file", file);
+
             try {
                 setUploadProgress((prev) =>
                     prev.map((p) =>
@@ -319,8 +231,12 @@ export default function DashboardV2() {
                     )
                 );
 
-                // Use the API client which includes session_id
-                const result = await uploadDocument(file, sessionId!);
+                const response = await fetch(`${RAG_API_URL}/api/rag/upload`, {
+                    method: "POST",
+                    body: formData,
+                });
+
+                const result = await response.json();
 
                 if (result.success) {
                     setUploadProgress((prev) =>
@@ -363,21 +279,9 @@ export default function DashboardV2() {
         }, 3000);
     };
 
-    // Text/URL upload handler - now includes session ID
+    // Text/URL upload handler
     const handleTextUpload = async (content: string, type: 'text' | 'website' | 'youtube') => {
         const filename = type === 'text' ? 'Pasted Text' : content.substring(0, 50) + '...';
-
-        // Ensure we have a session ID
-        let sessionId = currentSessionId;
-        if (!sessionId) {
-            sessionId = generateSessionId();
-            setCurrentSessionId(sessionId);
-            try {
-                await createSession("New Notebook", sessionId);
-            } catch (e) {
-                console.error("Failed to create session:", e);
-            }
-        }
 
         setUploadProgress((prev) => [...prev, {
             filename,
@@ -392,11 +296,20 @@ export default function DashboardV2() {
                 )
             );
 
-            // Create a text blob and upload with session ID
+            // For now, we'll create a text blob and upload it
+            // In the future, you might want dedicated endpoints for URL scraping
             const blob = new Blob([content], { type: 'text/plain' });
             const file = new File([blob], `${type}_content_${Date.now()}.txt`, { type: 'text/plain' });
 
-            const result = await uploadDocument(file, sessionId!);
+            const formData = new FormData();
+            formData.append("file", file);
+
+            const response = await fetch(`${RAG_API_URL}/api/rag/upload`, {
+                method: "POST",
+                body: formData,
+            });
+
+            const result = await response.json();
 
             if (result.success) {
                 setUploadProgress((prev) =>
@@ -553,7 +466,7 @@ export default function DashboardV2() {
     // Delete document
     const handleDeleteDocument = async (documentId: string) => {
         try {
-            await deleteDocument(documentId);
+            await fetch(`${RAG_API_URL}/api/rag/document/${documentId}`, { method: "DELETE" });
             setDocuments((prev) => prev.filter((d) => d.id !== documentId));
             fetchStats();
         } catch (error) {
@@ -561,44 +474,20 @@ export default function DashboardV2() {
         }
     };
 
-    // Clear session documents only
+    // Clear all documents
     const handleClearAll = async () => {
-        if (!confirm("Are you sure you want to clear all documents from this session?")) {
+        if (!confirm("Are you sure you want to clear all documents from the knowledge base?")) {
             return;
         }
 
         try {
-            // Delete each document in the current session
-            for (const doc of documents) {
-                await deleteDocument(doc.id);
-            }
+            await fetch(`${RAG_API_URL}/api/rag/clear`, { method: "DELETE" });
             setDocuments([]);
             setMessages([]);
             setNotebookTitle("Untitled Notebook");
-            fetchStats();
-        } catch (error) {
-            console.error("Failed to clear session documents:", error);
-        }
-    };
-
-    // Clear entire knowledge base (all ChromaDB data)
-    const handleClearKnowledgeBase = async () => {
-        try {
-            const response = await fetch(`${RAG_API_URL}/api/rag/clear`, { method: "DELETE" });
-            if (!response.ok) {
-                throw new Error("Failed to clear knowledge base");
-            }
-            // Clear local state as well
-            setDocuments([]);
-            setMessages([]);
-            setNotebookTitle("Untitled Notebook");
-            // Refresh sessions list
-            const sessionsResponse = await listSessions();
-            setSessions(sessionsResponse.sessions);
             fetchStats();
         } catch (error) {
             console.error("Failed to clear knowledge base:", error);
-            throw error; // Re-throw so the UI can show error state
         }
     };
 
@@ -719,7 +608,6 @@ export default function DashboardV2() {
                             uploadProgress={uploadProgress}
                             onDeleteSource={handleDeleteDocument}
                             onClearAll={handleClearAll}
-                            onClearKnowledgeBase={handleClearKnowledgeBase}
                             stats={stats}
                         />
                     </div>
@@ -729,7 +617,7 @@ export default function DashboardV2() {
                 {/* Chat Section */}
                 <div className="flex-1 flex flex-col min-w-0">
                     <div className="flex-1 bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
-                        <WebSocketProvider sessionId={currentSessionId} userId={user?.id}>
+                        <WebSocketProvider userId={user?.id}>
                             <ChatPanel
                                 hasSources={hasSources}
                                 onUploadClick={() => setShowUploadModal(true)}
@@ -769,12 +657,6 @@ export default function DashboardV2() {
                             pendingGenerationLabel={pendingGeneration}
                             hasSources={hasSources}
                             data={dummyData}
-                            onMindMapNodeClick={(nodeLabel: string, nodeData: any) => {
-                                // Send a contextual query to chat about the clicked node
-                                const rootContext = nodeData?.rootLabel || 'the knowledge base';
-                                const query = `Discuss what these sources say about ${nodeLabel}, in the larger context of ${rootContext}.`;
-                                handleQuery(query);
-                            }}
                         />
                     </div>
                 </div>
@@ -782,17 +664,7 @@ export default function DashboardV2() {
 
             {/* Modals */}
             {showArchitecture && (
-                <ArchitectureView
-                    onClose={() => setShowArchitecture(false)}
-                    onNodeClick={(nodeId: string, nodeData: any) => {
-                        // Send a contextual query to chat about the clicked node
-                        const nodeLabel = nodeData?.label || nodeId;
-                        const rootContext = nodeData?.rootLabel || 'the knowledge base';
-                        const query = `Discuss what these sources say about ${nodeLabel}, in the larger context of ${rootContext}.`;
-                        handleQuery(query);
-                        setShowArchitecture(false); // Close modal after clicking
-                    }}
-                />
+                <ArchitectureView onClose={() => setShowArchitecture(false)} />
             )}
 
             {showFlashcards && (
