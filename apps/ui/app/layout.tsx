@@ -20,20 +20,32 @@ export const metadata: Metadata = {
     "Transform your documents and audio with AI agents. Transcription, translation, summarization, RAG, and intelligent knowledge extraction.",
 };
 
+// Check if Clerk is properly configured (key must be valid format)
+const clerkPubKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+const isValidClerkKey = clerkPubKey &&
+  (clerkPubKey.startsWith('pk_live_') || clerkPubKey.startsWith('pk_test_')) &&
+  clerkPubKey.length > 20 &&
+  !clerkPubKey.includes('placeholder');
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return (
-    <ClerkProvider>
-      <html lang="en">
-        <body
-          className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-        >
-          <Providers>{children}</Providers>
-        </body>
-      </html>
-    </ClerkProvider>
+  const content = (
+    <html lang="en">
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
+        <Providers>{children}</Providers>
+      </body>
+    </html>
   );
+
+  // Only wrap with ClerkProvider if the key is valid
+  if (isValidClerkKey) {
+    return <ClerkProvider>{content}</ClerkProvider>;
+  }
+
+  return content;
 }

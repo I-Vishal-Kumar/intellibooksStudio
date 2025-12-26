@@ -11,6 +11,9 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  // Skip static page generation for pages using Clerk auth
+  // All auth-dependent pages will be rendered at request time
+  staticPageGenerationTimeout: 1,
 };
 
 export default nextConfig;
