@@ -80,7 +80,19 @@
       "Bash(\".venv\\\\Scripts\\\\python.exe\" -m uvicorn:*)",
       "Bash(timeout /t 2 /nobreak)",
       "Bash(pnpm build)",
-      "Bash(del \"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\nul\")"
+      "Bash(del \"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\nul\")",
+      "Bash(pnpm run dev:ws:*)",
+      "Bash(pnpm run dev:agents:*)",
+      "Bash(git fetch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nRefactor: Unified Studio page and RAG service consolidation\n\n- Rename /knowledge to /studio as unified page for RAG, Chat, Agents\n- Rename components/dashboard_v2 to components/studio\n- Delete /dashboard/v2 page \\(consolidated into /studio\\)\n- Update Sidebar and dashboard routes to point to /studio\n- Refactor research_agent to use RAG service HTTP API instead of local instance\n- Fix ChromaDB stale collection ID issue with refresh mechanism\n- Add retrieval_stats to RAG query response\n- Fix WebSocket port configuration \\(8004\\)\n- Add timeout handling for deep agent invocations\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git merge:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nMerge main branch: Analytics agent and chat UI updates\n\nMerged from main:\n- Analytics agent for database queries\n- Database providers \\(PostgreSQL\\)\n- Updated ChatPanel, MessageList components\n- New DatabaseConfigModal component\n- Route modules for transcription, meetings, conversations, notifications\n- Redis client utilities\n- UI providers and layout updates\n\nConflicts resolved:\n- Placed DatabaseConfigModal.tsx in components/studio/\n- Added route imports and router includes to websocket main.py\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(ls -la \"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\infrastructure\\\\docker\\\\init-scripts\"\" 2>/dev/null || echo \"Directory not found \")",
+      "Bash(\".venv\\\\Scripts\\\\pip.exe\" show neo4j)",
+      "Bash(\".venv\\\\Scripts\\\\pip.exe\" install edge-tts --quiet)",
+      "Bash(\".venv\\\\Scripts\\\\pip.exe\" install moviepy pillow --quiet)",
+      "Bash(if not exist \"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\services\\\\rag\\\\src\\\\media_generation\" mkdir \"c:\\\\Users\\\\JIPL\\\\Desktop\\\\audio-transcription\\\\services\\\\rag\\\\src\\\\media_generation\")"
     ]
   }
 }

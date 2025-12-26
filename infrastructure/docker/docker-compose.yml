@@ -82,6 +82,29 @@ services:
     networks:
       - intellibooks-network
 
+  neo4j:
+    image: neo4j:5-community
+    container_name: intellibooks-neo4j
+    environment:
+      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-devpassword123}
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_apoc_export_file_enabled=true
+      - NEO4J_apoc_import_file_enabled=true
+      - NEO4J_apoc_import_file_use__neo4j__config=true
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    ports:
+      - "7474:7474"  # HTTP Browser
+      - "7687:7687"  # Bolt Protocol
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "--spider", "http://localhost:7474" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - intellibooks-network
+
   # Ray Head Node for distributed processing
   ray-head:
     image: rayproject/ray:2.52.0-py312
@@ -315,6 +338,10 @@ volumes:
     name: intellibooks-rabbitmq-data
   agent_data:
     name: intellibooks-agent-data
+  neo4j_data:
+    name: intellibooks-neo4j-data
+  neo4j_logs:
+    name: intellibooks-neo4j-logs
 
 networks:
   intellibooks-network:

@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     chunk_overlap: int = 200
     top_k_results: int = 5
 
+    # Neo4j Graph Database
+    neo4j_uri: str = "bolt://localhost:7687"
+    neo4j_user: str = "neo4j"
+    neo4j_password: str = "devpassword123"
+    neo4j_database: str = "neo4j"
+
 
 @lru_cache()
 def get_settings() -> Settings:

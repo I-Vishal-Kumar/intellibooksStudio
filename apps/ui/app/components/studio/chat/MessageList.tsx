@@ -1,4 +1,4 @@
-import { FC, RefObject, useEffect, useState } from "react";
+import React, { FC, RefObject, useEffect, useState } from "react";
 import { PlusSquare, Copy, ThumbsUp, ThumbsDown, Clock, Loader2, Sparkles, Database, MessageCircle, Code, Table2, ChevronDown, ChevronUp } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -21,7 +21,7 @@ interface Message {
 
 // Processing status from smart handler
 interface ProcessingStatus {
-    intent: "general_chat" | "knowledge_query" | "hybrid";
+    intent: "general_chat" | "knowledge_query" | "hybrid" | "analytics_query";
     description: string;
 }
 
@@ -33,7 +33,7 @@ interface MessageListProps {
 }
 
 // Get icon and color based on intent/message type
-const getMessageIcon = (metadata?: Record<string, unknown>) => {
+const getMessageIcon = (metadata?: Record<string, unknown>): React.ReactNode => {
     const intent = metadata?.detected_intent as string;
     const ragUsed = metadata?.rag_used as boolean;
 
@@ -49,7 +49,7 @@ const getMessageIcon = (metadata?: Record<string, unknown>) => {
 };
 
 // Get loading icon and text based on processing status
-const getLoadingInfo = (processingStatus?: ProcessingStatus | null) => {
+const getLoadingInfo = (processingStatus?: ProcessingStatus | null): { icon: React.ReactNode; text: string; color: string } => {
     if (!processingStatus) {
         return {
             icon: <Sparkles className="w-4 h-4 text-white" />,
@@ -120,6 +120,64 @@ const ActionBadge: FC<{ metadata?: Record<string, unknown> }> = ({ metadata }) =
     }
 
     return null;
+};
+
+// Markdown Renderer Component - isolated to avoid type issues
+const MarkdownRenderer: FC<{ content: string; isUserMessage: boolean }> = ({ content, isUserMessage }) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const components: any = {
+        code: ({ className, children, ...props }: any) => {
+            const match = /language-(\w+)/.exec(className || '');
+            const isInline = !match && !String(children).includes('\n');
+            return !isInline ? (
+                <pre className={`${isUserMessage ? 'bg-gray-800' : 'bg-gray-900'} text-gray-100 rounded-lg p-4 overflow-x-auto my-2`}>
+                    <code className={className} {...props}>
+                        {children}
+                    </code>
+                </pre>
+            ) : (
+                <code className={`${isUserMessage ? 'text-purple-200 bg-purple-900/30' : 'text-purple-600 bg-purple-50'} px-1 py-0.5 rounded text-xs`} {...props}>
+                    {children}
+                </code>
+            );
+        },
+        a: ({ ...props }: any) => (
+            <a
+                className={isUserMessage ? "text-purple-200 hover:underline" : "text-purple-600 hover:underline"}
+                target="_blank"
+                rel="noopener noreferrer"
+                {...props}
+            />
+        ),
+        h1: ({ ...props }: any) => (
+            <h1 className={`text-lg font-semibold ${isUserMessage ? 'text-white' : 'text-gray-900'} mt-4 mb-2`} {...props} />
+        ),
+        h2: ({ ...props }: any) => (
+            <h2 className={`text-base font-semibold ${isUserMessage ? 'text-white' : 'text-gray-900'} mt-3 mb-2`} {...props} />
+        ),
+        h3: ({ ...props }: any) => (
+            <h3 className={`text-sm font-semibold ${isUserMessage ? 'text-white' : 'text-gray-900'} mt-2 mb-1`} {...props} />
+        ),
+        ul: ({ ...props }: any) => (
+            <ul className="list-disc pl-5 my-2" {...props} />
+        ),
+        ol: ({ ...props }: any) => (
+            <ol className="list-decimal pl-5 my-2" {...props} />
+        ),
+        blockquote: ({ ...props }: any) => (
+            <blockquote className={`border-l-4 ${isUserMessage ? 'border-purple-300 text-purple-100' : 'border-gray-300 text-gray-600'} pl-4 italic my-2`} {...props} />
+        ),
+    };
+
+    return (
+        <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeHighlight]}
+            components={components}
+        >
+            {content}
+        </ReactMarkdown>
+    );
 };
 
 // SQL Query Display Component
@@ -210,7 +268,7 @@ export const MessageList: FC<MessageListProps> = ({
     isQuerying,
     processingStatus,
     messagesEndRef,
-}) => {
+}): React.ReactElement => {
     return (
         <div className="p-6 space-y-6">
             {messages.map((message) => (
@@ -239,77 +297,11 @@ export const MessageList: FC<MessageListProps> = ({
                             )}
 
                             <div className={`text-sm leading-relaxed ${
-                                message.role === "user" 
+                                message.role === "user"
                                     ? "prose prose-sm max-w-none prose-invert prose-headings:text-white prose-p:text-white prose-p:my-2 prose-a:text-purple-200 prose-a:no-underline hover:prose-a:underline prose-strong:text-white prose-strong:font-semibold prose-code:text-purple-200 prose-code:bg-purple-900/30 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-pre:rounded-lg prose-pre:p-4 prose-pre:overflow-x-auto prose-ul:list-disc prose-ul:pl-5 prose-ol:list-decimal prose-ol:pl-5 prose-li:my-1 prose-blockquote:border-l-4 prose-blockquote:border-purple-300 prose-blockquote:pl-4 prose-blockquote:italic prose-hr:border-purple-300"
                                     : "prose prose-sm max-w-none prose-headings:font-semibold prose-headings:text-gray-900 prose-p:text-gray-700 prose-p:my-2 prose-a:text-purple-600 prose-a:no-underline hover:prose-a:underline prose-strong:text-gray-900 prose-strong:font-semibold prose-code:text-purple-600 prose-code:bg-purple-50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-pre:rounded-lg prose-pre:p-4 prose-pre:overflow-x-auto prose-ul:list-disc prose-ul:pl-5 prose-ol:list-decimal prose-ol:pl-5 prose-li:my-1 prose-blockquote:border-l-4 prose-blockquote:border-gray-300 prose-blockquote:pl-4 prose-blockquote:italic prose-hr:border-gray-200"
                             }`}>
-                                <ReactMarkdown
-                                    remarkPlugins={[remarkGfm]}
-                                    rehypePlugins={[rehypeHighlight]}
-                                    components={{
-                                        // Customize code blocks
-                                        code: ({ node, inline, className, children, ...props }) => {
-                                            const match = /language-(\w+)/.exec(className || '');
-                                            const isUserMessage = message.role === "user";
-                                            return !inline ? (
-                                                <pre className={`${isUserMessage ? 'bg-gray-800' : 'bg-gray-900'} text-gray-100 rounded-lg p-4 overflow-x-auto my-2`}>
-                                                    <code className={className} {...props}>
-                                                        {children}
-                                                    </code>
-                                                </pre>
-                                            ) : (
-                                                <code className={`${isUserMessage ? 'text-purple-200 bg-purple-900/30' : 'text-purple-600 bg-purple-50'} px-1 py-0.5 rounded text-xs`} {...props}>
-                                                    {children}
-                                                </code>
-                                            );
-                                        },
-                                        // Customize links
-                                        a: ({ node, ...props }) => {
-                                            const isUserMessage = message.role === "user";
-                                            return (
-                                                <a
-                                                    className={isUserMessage ? "text-purple-200 hover:underline" : "text-purple-600 hover:underline"}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    {...props}
-                                                />
-                                            );
-                                        },
-                                        // Customize headings
-                                        h1: ({ node, ...props }) => {
-                                            const isUserMessage = message.role === "user";
-                                            return (
-                                                <h1 className={`text-lg font-semibold ${isUserMessage ? 'text-white' : 'text-gray-900'} mt-4 mb-2`} {...props} />
-                                            );
-                                        },
-                                        h2: ({ node, ...props }) => {
-                                            const isUserMessage = message.role === "user";
-                                            return (
-                                                <h2 className={`text-base font-semibold ${isUserMessage ? 'text-white' : 'text-gray-900'} mt-3 mb-2`} {...props} />
-                                            );
-                                        },
-                                        h3: ({ node, ...props }) => {
-                                            const isUserMessage = message.role === "user";
-                                            return (
-                                                <h3 className={`text-sm font-semibold ${isUserMessage ? 'text-white' : 'text-gray-900'} mt-2 mb-1`} {...props} />
-                                            );
-                                        },
-                                        // Customize lists
-                                        ul: ({ node, ...props }) => (
-                                            <ul className="list-disc pl-5 my-2" {...props} />
-                                        ),
-                                        ol: ({ node, ...props }) => (
-                                            <ol className="list-decimal pl-5 my-2" {...props} />
-                                        ),
-                                        // Customize blockquotes
-                                        blockquote: ({ node, ...props }) => {
-                                            const isUserMessage = message.role === "user";
-                                            return (
-                                                <blockquote className={`border-l-4 ${isUserMessage ? 'border-purple-300 text-purple-100' : 'border-gray-300 text-gray-600'} pl-4 italic my-2`} {...props} />
-                                            );
-                                        },
-                                    }}
-                                >
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                     {message.content}
                                 </ReactMarkdown>
                             </div>
