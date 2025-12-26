@@ -1,533 +1,273 @@
 # Intellibooks Studio
 
-AI-Powered Document Intelligence Platform with RAG, Agents, and MCP integration.
+A powerful AI-powered enterprise platform with multi-service integrations.
 
-## Features
+## Quick Start (Docker)
 
-- **Audio Transcription** - Convert audio files to text using OpenAI Whisper
-- **Translation** - Translate transcripts to 30+ languages
-- **Summarization** - Generate summaries with key points and action items
-- **Intent Detection** - Classify content into categories
-- **Keyword Extraction** - Extract keywords, keyphrases, and named entities
-- **RAG Pipeline** - Semantic search with Ray distributed processing & RabbitMQ queuing
-- **Multi-Provider LLM** - OpenAI, Anthropic, OpenRouter support
-- **MCP Integration** - Database, Teams, Slack, GitHub MCP servers
+### Prerequisites
 
-## Architecture
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
+- Git (to clone the repository)
 
-```
-┌─────────────┐     REST/WS     ┌─────────────┐
-│  NextJS UI  │<--------------->│ API Gateway │
-│             │                 │             │
-└─────────────┘                 └──────┬──────┘
-                                       │
-        ┌──────────────────────────────┼──────────────────────────────┐
-        │                              │                              │
-        v                              v                              v
-┌───────────────┐           ┌───────────────┐           ┌───────────────┐
-│ Agent Service │           │  RAG Service  │           │ RBAC Service  │
-│  (Port 8001)  │           │  (Port 8002)  │           │  (Port 8003)  │
-└───────┬───────┘           └───────┬───────┘           └───────────────┘
-        │                           │
-        │         MCP Protocol      │
-        └───────────────────────────┘
-        │                           │
-        v                           v
-┌───────────────┐           ┌───────────────┐
-│ Database MCP  │           │ Integration   │
-│               │           │ MCPs (Teams,  │
-│               │           │ Slack, GitHub)│
-└───────────────┘           └───────────────┘
-```
-
-## Project Structure
-
-```
-intellibooks-studio/
-├── packages/                     # Shared libraries
-│   ├── core/                     # Types, schemas, utilities
-│   ├── agent-framework/          # Agent Identity Cards, DNA Blueprint
-│   └── auth/                     # Clerk, RBAC middleware
-├── apps/
-│   ├── ui/                       # NextJS 16 application
-│   └── api-gateway/              # Central API gateway
-├── services/
-│   ├── agents/                   # Agent service (Python/FastAPI)
-│   ├── rag/                      # RAG pipeline (Python/FastAPI)
-│   ├── rbac/                     # RBAC service (Node/Express)
-│   └── websocket/                # WebSocket service
-├── mcp-servers/
-│   ├── database-mcp/             # Database operations
-│   ├── github-mcp/               # GitHub integration
-│   ├── slack-mcp/                # Slack integration
-│   ├── teams-mcp/                # MS Teams integration
-│   └── mcp-registry/             # MCP server discovery
-├── infrastructure/               # Docker Compose, configs
-├── turbo.json                    # Turborepo config
-├── pnpm-workspace.yaml           # PNPM workspaces
-└── pyproject.toml                # Python monorepo config
-```
-
-## Tech Stack
-
-### Backend
-- **Python 3.10+** - FastAPI, LangChain, LangGraph
-- **Node.js 18+** - Express, TypeScript
-- **Whisper** - Audio transcription
-- **ChromaDB** - Vector database
-- **Ray** - Distributed processing (Docker-based on Windows)
-- **RabbitMQ** - Message queue
-- **PostgreSQL** - Primary database
-- **Redis** - Caching and pub/sub
-
-### Frontend
-- **Next.js 16** - React framework
-- **Tailwind CSS** - Styling
-- **Clerk** - Authentication
-- **React Query** - Data fetching
-
----
-
-## Prerequisites
-
-| Tool | Version | Installation |
-|------|---------|--------------|
-| **Node.js** | 18+ | [nodejs.org](https://nodejs.org/) |
-| **Python** | 3.10+ | [python.org](https://python.org/) |
-| **pnpm** | 8+ | `npm install -g pnpm` |
-| **Docker** | Latest | [docker.com](https://docker.com/) |
-| **FFmpeg** | Latest | Required for audio processing |
-| **Tesseract OCR** | 5.x | Required for scanned PDF OCR |
-| **Poppler** | Latest | Required for PDF to image conversion |
-
-### Installing FFmpeg
-
-**Windows (with winget):**
-```powershell
-winget install FFmpeg
-```
-
-**macOS:**
-```bash
-brew install ffmpeg
-```
-
-**Linux (Ubuntu/Debian):**
-```bash
-sudo apt update && sudo apt install ffmpeg
-```
-
-### Installing Tesseract OCR (Required for Scanned PDF Support)
-
-Tesseract OCR is required to extract text from scanned/image-based PDFs.
-
-**Windows (with winget):**
-```powershell
-winget install UB-Mannheim.TesseractOCR
-```
-
-After installation, Tesseract should be available at:
-- `C:\Program Files\Tesseract-OCR\tesseract.exe`
-
-**macOS:**
-```bash
-brew install tesseract
-```
-
-**Linux (Ubuntu/Debian):**
-```bash
-sudo apt update && sudo apt install tesseract-ocr
-```
-
-### Installing Poppler (Required for Scanned PDF Support)
-
-Poppler provides the `pdftoppm` utility needed to convert PDF pages to images for OCR.
-
-**Windows (with winget):**
-```powershell
-winget install poppler
-```
-
-After installation, Poppler binaries should be available at one of these locations:
-- `C:\Users\<username>\AppData\Local\Microsoft\WinGet\Packages\oschwartz10612.Poppler_...\poppler-X.XX.X\Library\bin`
-- `C:\Program Files\poppler\Library\bin`
-- `C:\Program Files\poppler\bin`
-
-**macOS:**
-```bash
-brew install poppler
-```
-
-**Linux (Ubuntu/Debian):**
-```bash
-sudo apt update && sudo apt install poppler-utils
-```
-
-> **Note:** After installing Tesseract and Poppler on Windows, you may need to restart your terminal/PowerShell for the PATH changes to take effect. The RAG service will automatically detect these tools at their default installation paths.
-
----
-
-## Quick Start Guide
-
-### Step 1: Clone and Setup
+### Step 1: Clone and Navigate
 
 ```bash
-# Clone the repository
-git clone https://github.com/intellibooks/intellibooks-studio.git
-cd intellibooks-studio
+git clone <repository-url>
+cd IntelliBooksStudio
+```
 
-# Install JavaScript dependencies
-pnpm install
+### Step 2: Set Up Environment
 
-# Setup Python services (installs all services as editable packages)
-# Linux/macOS
-./scripts/setup-python-services.sh
+Copy the example environment file:
 
-# Windows (PowerShell)
-.\scripts\setup-python-services.ps1
-
-# Or manually:
-# Create Python virtual environment
-python -m venv .venv
-
-# Activate virtual environment
+```bash
 # Windows
-.venv\Scripts\activate
-# Linux/macOS
-source .venv/bin/activate
+copy .env.example .env
 
-# Install Python services as editable packages
-pip install -e ".[dev]"
-pip install -e services/agents[dev]
-pip install -e services/websocket[dev]
-pip install -e services/rag[dev]
-pip install -e packages/agent-framework[dev]
-```
-
-### Step 2: Configure Environment Variables
-
-```bash
-# Copy the example environment file
+# Mac/Linux
 cp .env.example .env
 ```
 
-Edit `.env` with your API keys:
+Edit `.env` and add your API keys:
 
 ```env
-# LLM Providers (at least one required)
-OPENAI_API_KEY=sk-your-openai-key
-ANTHROPIC_API_KEY=sk-ant-your-anthropic-key
-OPENROUTER_API_KEY=sk-or-your-openrouter-key
-DEFAULT_LLM_PROVIDER=openrouter
+# Required - Choose at least one LLM provider
+OPENROUTER_API_KEY=your-openrouter-key
 
-# Whisper Configuration (tiny, base, small, medium, large)
-WHISPER_MODEL=base
-
-# ChromaDB (Docker)
-CHROMA_HOST=localhost
-CHROMA_PORT=8000
-
-# Ray (Docker-based, required for Windows)
-USE_RAY=true
-RAY_ADDRESS=ray://localhost:10001
-
-# RabbitMQ
-USE_RABBITMQ=true
-RABBITMQ_HOST=localhost
-RABBITMQ_PORT=5672
-RABBITMQ_USER=admin
-RABBITMQ_PASSWORD=devpassword123
-
-# Authentication (Clerk)
-CLERK_PUBLISHABLE_KEY=pk_test_your-clerk-key
-CLERK_SECRET_KEY=sk_test_your-clerk-secret
+# Optional - For OAuth integrations (see below)
+NEXT_PUBLIC_NANGO_PUBLIC_KEY=your-nango-public-key
 ```
 
-### Step 3: Start Infrastructure Services
+### Step 3: Run Everything
 
 ```bash
+# Navigate to docker folder
 cd infrastructure/docker
 
-# Start core infrastructure
-docker-compose up -d chroma rabbitmq redis postgres
-
-# (Optional) Start Ray cluster for distributed processing
-docker-compose --profile ray up -d
-
-# Verify services are running
-docker-compose ps
+# Start all services
+docker-compose --profile app up -d --build
 ```
 
-### Step 4: Run the Application
+That's it! Wait a few minutes for everything to build and start.
+
+### Step 4: Access the Application
+
+Open your browser and go to:
+
+- **Main App**: http://localhost:3000
+- **API Docs**: http://localhost:8002/docs
+
+---
+
+## Setting Up OAuth Integrations (Optional)
+
+This project uses **Nango** to handle OAuth connections (Google, Zoom, Slack, etc.). With Nango, your users can simply click "Connect" and log in - no API keys needed for them!
+
+### Why Nango?
+
+- Free tier available (up to 3 integrations)
+- Users just click "Connect" and authorize - like Pipedream
+- Handles token refresh automatically
+- Supports 500+ services
+
+### Setup Steps
+
+1. **Sign up at [nango.dev](https://nango.dev)** (free)
+
+2. **Get your keys** from the Nango dashboard:
+   - Public Key (for frontend)
+   - Secret Key (for backend)
+
+3. **Add to your `.env` file**:
+   ```env
+   NEXT_PUBLIC_NANGO_PUBLIC_KEY=your-public-key
+   NANGO_SECRET_KEY=your-secret-key
+   ```
+
+4. **Configure integrations in Nango**:
+   - Go to Nango dashboard > Integrations
+   - Enable: Google, Zoom, Slack, etc.
+   - For each, add your OAuth credentials (from Google Cloud Console, Zoom Marketplace, etc.)
+
+5. **Restart the app**:
+   ```bash
+   docker-compose --profile app down
+   docker-compose --profile app up -d --build
+   ```
+
+Now users can connect their accounts from the Settings > Integrations page!
+
+---
+
+## Service Ports
+
+| Service | Port | URL |
+|---------|------|-----|
+| UI (Frontend) | 3000 | http://localhost:3000 |
+| RAG Service | 8002 | http://localhost:8002 |
+| WebSocket | 8004 | http://localhost:8004 |
+| MCP Gateway | 8005 | http://localhost:8005 |
+| PostgreSQL | 5433 | localhost:5433 |
+| Redis | 6379 | localhost:6379 |
+| ChromaDB | 8000 | http://localhost:8000 |
+| Neo4j | 7474/7687 | http://localhost:7474 |
+| RabbitMQ | 15672 | http://localhost:15672 |
+
+---
+
+## Common Commands
+
+### Start Services
+```bash
+cd infrastructure/docker
+docker-compose --profile app up -d --build
+```
+
+### Stop Services
+```bash
+docker-compose --profile app down
+```
+
+### View Logs
+```bash
+# All services
+docker-compose --profile app logs -f
+
+# Specific service
+docker-compose logs -f ui
+docker-compose logs -f rag-service
+```
+
+### Rebuild After Changes
+```bash
+docker-compose --profile app up -d --build
+```
+
+### Reset Everything (Clean Start)
+```bash
+docker-compose --profile app down -v
+docker-compose --profile app up -d --build
+```
+
+---
+
+## Local Development (With Hot Reload)
+
+For development with real-time code changes, use `pnpm dev:all` to run everything at once.
+
+### Prerequisites
+
+- Node.js 18+
+- pnpm (`npm install -g pnpm`)
+- Python 3.10+
+
+### Quick Start (Recommended)
 
 ```bash
-# Run all services at once (recommended)
+# 1. Install dependencies
+pnpm install
+
+# 2. Start infrastructure (databases)
+cd infrastructure/docker
+docker-compose up -d
+cd ../..
+
+# 3. Run all services with hot reload
 pnpm dev:all
 ```
 
-Or run services individually:
+This runs UI, WebSocket, Agents, and RAG services concurrently with color-coded logs.
+
+### Individual Services
+
+Run specific services if needed:
 
 ```bash
-# Terminal 1 - Agent Service (port from ports.json)
-pnpm dev:agents
+# Frontend only
+pnpm dev:ui
 
-# Terminal 2 - RAG Service (port from ports.json)
-pnpm dev:rag
-
-# Terminal 3 - WebSocket Service (port from ports.json)
+# WebSocket service only
 pnpm dev:ws
 
-# Terminal 4 - UI (port from ports.json)
-pnpm dev:ui
+# RAG service only
+pnpm dev:rag
+
+# Agents service only
+pnpm dev:agents
 ```
 
-**Note:** All service ports are centrally managed in `packages/core/ports.json`. To change a port, update `ports.json` and restart the service.
+### Manual Python Services (Alternative)
 
-### Step 5: Access the Application
-
-| Service | URL | Description |
-|---------|-----|-------------|
-| **UI** | http://localhost:3001 | Main web interface |
-| **Agent Service** | http://localhost:8001/docs | Agent API (Swagger UI) |
-| **RAG Service** | http://localhost:8002/docs | RAG API (Swagger UI) |
-| **ChromaDB** | http://localhost:8000 | Vector database |
-| **RabbitMQ Management** | http://localhost:15672 | Message queue UI (admin/devpassword123) |
-| **Ray Dashboard** | http://localhost:8265 | Distributed processing UI |
-
----
-
-## Docker Services
-
-### Start All Infrastructure
-```bash
-cd infrastructure/docker
-
-# Core services
-docker-compose up -d chroma rabbitmq redis postgres
-
-# With Ray cluster
-docker-compose --profile ray up -d
-
-# With development tools (Adminer, Redis Commander)
-docker-compose --profile tools up -d
-```
-
-### Service Ports
-
-| Service | Port | Description |
-|---------|------|-------------|
-| PostgreSQL | 5432 | Primary database |
-| Redis | 6379 | Cache & pub/sub |
-| ChromaDB | 8000 | Vector database |
-| RabbitMQ | 5672 | Message queue |
-| RabbitMQ UI | 15672 | Management interface |
-| Ray Dashboard | 8265 | Distributed processing UI |
-| Ray Client | 10001 | Ray client connection |
-| Adminer | 8080 | Database admin (tools profile) |
-
----
-
-## API Reference
-
-### Agent Service (Port 8001)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/health` | GET | Health check |
-| `/api/upload` | POST | Upload audio file |
-| `/api/agents/process` | POST | Process audio with agents |
-| `/api/agents/analyze-text` | POST | Analyze text directly |
-| `/api/agents/registry` | GET | List registered agents |
-
-### RAG Service (Port 8002)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/health` | GET | Health check |
-| `/api/ingest` | POST | Ingest documents |
-| `/api/query` | POST | Query with RAG |
-| `/api/search` | POST | Semantic search |
-| `/api/stats` | GET | Pipeline statistics |
-| `/api/documents/:id` | DELETE | Delete document |
-
-### RBAC Service (Port 8003)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/health` | GET | Health check |
-| `/api/auth/verify` | POST | Verify token |
-| `/api/auth/authorize` | POST | Check authorization |
-| `/api/users/me` | GET | Get current user |
-| `/api/users` | GET | List users |
-| `/api/roles` | GET | List roles |
-
----
-
-## Development
-
-### Running Tests
+If you prefer running Python services manually:
 
 ```bash
-# JavaScript tests
-pnpm test
+# RAG Service
+cd services/rag
+pip install -r requirements.txt
+uvicorn src.api.main:app --reload --port 8002
 
-# Python tests
-pytest services/agents/tests -v
-pytest services/rag/tests -v
-
-# Test with coverage
-pytest --cov=services/agents/src services/agents/tests
-```
-
-### Code Formatting
-
-```bash
-# JavaScript/TypeScript
-pnpm lint
-pnpm lint:fix
-
-# Python
-black services/ packages/
-ruff check services/ packages/ --fix
-```
-
-### Building
-
-```bash
-pnpm build
+# WebSocket Service
+cd services/websocket
+pip install -r requirements.txt
+uvicorn src.main:app --reload --port 8004
 ```
 
 ---
 
 ## Troubleshooting
 
-### Common Issues
-
-**1. FFmpeg not found**
-```
-Error: FFmpeg not found. Please install FFmpeg.
-```
-Solution: Install FFmpeg and ensure it's in your PATH. Run `ffmpeg -version` to verify.
-
-**2. ChromaDB connection failed**
-```
-Error: Could not connect to Chroma at localhost:8000
-```
-Solution: Start the Chroma container:
+### Docker build fails with "path not found"
+Make sure you're in the `infrastructure/docker` folder:
 ```bash
 cd infrastructure/docker
-docker-compose up -d chroma
+docker-compose --profile app up -d --build
 ```
 
-**3. Ray connection failed (Windows)**
-```
-Error: Could not connect to Ray cluster
-```
-Solution: Ray doesn't work with venv on Windows. Start the Docker Ray cluster:
+### Port already in use
+Stop any existing services or change ports in `docker-compose.yml`.
+
+### Services not connecting
+Wait 1-2 minutes for all services to start. Check logs:
 ```bash
-cd infrastructure/docker
-docker-compose --profile ray up -d
+docker-compose --profile app logs -f
 ```
 
-**4. RabbitMQ connection failed**
+### OAuth not working
+1. Check that `NEXT_PUBLIC_NANGO_PUBLIC_KEY` is set in `.env`
+2. Verify integrations are configured in Nango dashboard
+3. Restart: `docker-compose --profile app restart ui`
+
+---
+
+## Architecture Overview
+
 ```
-Error: Connection refused to RabbitMQ
-```
-Solution: Start RabbitMQ:
-```bash
-cd infrastructure/docker
-docker-compose up -d rabbitmq
-```
-
-**5. Scanned PDF OCR failed - Tesseract not found**
-```
-Error: tesseract is not installed or it's not in your PATH
-```
-Solution: Install Tesseract OCR:
-```powershell
-# Windows
-winget install UB-Mannheim.TesseractOCR
-
-# macOS
-brew install tesseract
-
-# Linux
-sudo apt install tesseract-ocr
-```
-
-**6. Scanned PDF OCR failed - Poppler not found**
-```
-Error: Unable to get page count. Is poppler installed and in PATH?
-```
-Solution: Install Poppler:
-```powershell
-# Windows
-winget install poppler
-
-# macOS
-brew install poppler
-
-# Linux
-sudo apt install poppler-utils
-```
-After installation on Windows, restart your terminal for PATH changes to take effect.
-
-**7. Port already in use**
-```
-Error: Port 8001 is already in use
-```
-Solution: Kill the process or use a different port:
-```bash
-# Windows
-netstat -ano | findstr :8001
-taskkill /PID <PID> /F
-
-# Linux/macOS
-lsof -i :8001
-kill -9 <PID>
-```
-
-### Viewing Logs
-
-```bash
-# Docker container logs
-docker-compose -f infrastructure/docker/docker-compose.yml logs -f
-
-# Specific service logs
-docker-compose -f infrastructure/docker/docker-compose.yml logs -f chroma
-docker-compose -f infrastructure/docker/docker-compose.yml logs -f rabbitmq
-```
-
-### Resetting the Environment
-
-```bash
-# Stop all containers
-docker-compose -f infrastructure/docker/docker-compose.yml down
-
-# Remove volumes (WARNING: deletes all data)
-docker-compose -f infrastructure/docker/docker-compose.yml down -v
-
-# Start fresh
-docker-compose -f infrastructure/docker/docker-compose.yml up -d chroma rabbitmq redis postgres
++-------------------------------------------------------------+
+|                        Frontend (UI)                         |
+|                    Next.js @ port 3000                       |
++----------------------------+--------------------------------+
+                             |
+           +-----------------+-----------------+
+           v                 v                 v
+    +-----------+     +-----------+     +-----------+
+    |    RAG    |     | WebSocket |     |    MCP    |
+    |  Service  |     |  Service  |     |  Gateway  |
+    |   :8002   |     |   :8004   |     |   :8005   |
+    +-----+-----+     +-----+-----+     +-----+-----+
+          |                 |                 |
+          +-----------------+-----------------+
+                            v
+        +------------------------------------+
+        |         Infrastructure             |
+        |  PostgreSQL, Redis, ChromaDB,      |
+        |  Neo4j, RabbitMQ                   |
+        +------------------------------------+
 ```
 
 ---
 
-## Contributing
+## Need Help?
 
-1. Fork the repository
-2. Create a feature branch from `main`
-3. Make changes following coding standards
-4. Write/update tests
-5. Submit PR with description
-6. Address review comments
-7. Merge after approval
-
-## License
-
-MIT License - see LICENSE file for details.
-
-## Support
-
-- GitHub Issues: [Report a bug](https://github.com/intellibooks/intellibooks-studio/issues)
-- Documentation: [Wiki](https://github.com/intellibooks/intellibooks-studio/wiki)
+- Check the logs: `docker-compose --profile app logs -f`
+- Restart services: `docker-compose --profile app restart`
+- Clean rebuild: `docker-compose --profile app down -v && docker-compose --profile app up -d --build`

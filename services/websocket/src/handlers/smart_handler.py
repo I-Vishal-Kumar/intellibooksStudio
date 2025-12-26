@@ -33,7 +33,7 @@ if intellibooks_db_path.exists() and str(services_path) not in sys.path:
     sys.path.insert(0, str(services_path))
 
 # Import agents with proper path resolution
-# project_root = parent of services = audio-transcription/
+# project_root = parent of services = IntelliBooksStudio/
 project_root = services_path.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))

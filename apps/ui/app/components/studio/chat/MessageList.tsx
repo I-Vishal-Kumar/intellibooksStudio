@@ -1,9 +1,14 @@
-import React, { FC, RefObject, useEffect, useState } from "react";
+import React, { FC, RefObject, useEffect, useState, ReactNode, JSX } from "react";
 import { PlusSquare, Copy, ThumbsUp, ThumbsDown, Clock, Loader2, Sparkles, Database, MessageCircle, Code, Table2, ChevronDown, ChevronUp } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github-dark.css";
+
+// Wrapper component to fix ReactMarkdown type compatibility with React 19
+const MarkdownContent: FC<{ children: string }> = ({ children }): JSX.Element => {
+    return <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>;
+};
 
 interface Message {
     id: string;
@@ -301,9 +306,7 @@ export const MessageList: FC<MessageListProps> = ({
                                     ? "prose prose-sm max-w-none prose-invert prose-headings:text-white prose-p:text-white prose-p:my-2 prose-a:text-purple-200 prose-a:no-underline hover:prose-a:underline prose-strong:text-white prose-strong:font-semibold prose-code:text-purple-200 prose-code:bg-purple-900/30 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-pre:rounded-lg prose-pre:p-4 prose-pre:overflow-x-auto prose-ul:list-disc prose-ul:pl-5 prose-ol:list-decimal prose-ol:pl-5 prose-li:my-1 prose-blockquote:border-l-4 prose-blockquote:border-purple-300 prose-blockquote:pl-4 prose-blockquote:italic prose-hr:border-purple-300"
                                     : "prose prose-sm max-w-none prose-headings:font-semibold prose-headings:text-gray-900 prose-p:text-gray-700 prose-p:my-2 prose-a:text-purple-600 prose-a:no-underline hover:prose-a:underline prose-strong:text-gray-900 prose-strong:font-semibold prose-code:text-purple-600 prose-code:bg-purple-50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-pre:rounded-lg prose-pre:p-4 prose-pre:overflow-x-auto prose-ul:list-disc prose-ul:pl-5 prose-ol:list-decimal prose-ol:pl-5 prose-li:my-1 prose-blockquote:border-l-4 prose-blockquote:border-gray-300 prose-blockquote:pl-4 prose-blockquote:italic prose-hr:border-gray-200"
                             }`}>
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                    {message.content}
-                                </ReactMarkdown>
+                                <MarkdownContent>{message.content}</MarkdownContent>
                             </div>
 
                             {/* SQL Query (for analytics) */}

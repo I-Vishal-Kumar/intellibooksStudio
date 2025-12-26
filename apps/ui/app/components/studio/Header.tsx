@@ -8,12 +8,12 @@ interface HeaderProps {
     currentUserId?: string;
 }
 
-const Header: FC<HeaderProps> = ({
+const Header = ({
     title = "jAI Enterprise Agent Characteristics Framework",
     onCreateNotebook,
     onShare,
     currentUserId
-}) => {
+}: HeaderProps) => {
     return (
         <header className="flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200 shrink-0">
             <div className="flex items-center gap-4">

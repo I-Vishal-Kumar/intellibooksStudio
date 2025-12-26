@@ -50,7 +50,7 @@ Intellibooks Studio is a multi-team monorepo platform for document intelligence,
 ## Project Structure
 
 ```
-audio-transcription/
+IntelliBooksStudio/
 ├── packages/                     # Shared libraries (npm/pip packages)
 │   ├── core/                     # @audio-insight/core - Types, schemas, utilities
 │   ├── agent-framework/          # Agent Identity Cards, DNA Blueprint
@@ -172,7 +172,7 @@ blueprint = (
 ```bash
 # Clone and install
 git clone <repo>
-cd audio-transcription
+cd IntelliBooksStudio
 pnpm install
 
 # Start infrastructure
