@@ -31,8 +31,34 @@ interface StudioPanelProps {
     onItemClick?: (label: string) => void;
     pendingGenerationLabel?: string;
     hasSources: boolean;
-    data: any;
     onMindMapNodeClick?: (nodeLabel: string, nodeData: any) => void;
+}
+
+// Static configuration for studio items
+const STUDIO_ITEMS = [
+    { id: "audio", label: "Audio Overview", icon: "Volume2", color: "text-blue-500", bgColor: "bg-[#eff6ff]" },
+    { id: "video", label: "Video Overview", icon: "Video", color: "text-green-600", bgColor: "bg-[#f0fdf4]" },
+    { id: "mindmap", label: "Mind Map", icon: "Map", color: "text-rose-500", bgColor: "bg-[#fff1f2]" },
+    { id: "reports", label: "Reports", icon: "FileText", color: "text-amber-600", bgColor: "bg-[#fffbeb]" },
+    { id: "flashcards", label: "Flashcards", icon: "Layout", color: "text-orange-600", bgColor: "bg-[#fff7ed]" },
+    { id: "quiz", label: "Quiz", icon: "HelpCircle", color: "text-blue-400", bgColor: "bg-[#f0f9ff]" },
+    { id: "infographic", label: "Infographic", icon: "FileBarChart", color: "text-indigo-600", bgColor: "bg-[#f5f3ff]", isBeta: true },
+    { id: "slidedeck", label: "Slide Deck", icon: "Presentation", color: "text-yellow-600", bgColor: "bg-[#fefce8]", isBeta: true },
+];
+
+// Supported languages for audio overview
+const SUPPORTED_LANGUAGES = [
+    "हिन्दी", "বাংলা", "ગુજરાતી", "ಕನ್ನಡ", "മലയാളം", "मराठी", "ਪੰਜਾਬੀ", "தமிழ்", "తెలుగు"
+];
+
+interface GeneratedNote {
+    id: string;
+    icon: string;
+    title: string;
+    subtitle: string;
+    color: string;
+    clickable: boolean;
+    viewType: string;
 }
 
 const IconMapper = ({ name, size = 18, className = "" }: { name: string; size?: number; className?: string }) => {
@@ -41,10 +67,10 @@ const IconMapper = ({ name, size = 18, className = "" }: { name: string; size?: 
     return <IconComponent size={size} className={className} />;
 };
 
-const StudioPanel: FC<StudioPanelProps> = ({ isCollapsed, onToggle, onNoteClick, onItemClick, pendingGenerationLabel, hasSources, data: initialData, onMindMapNodeClick }) => {
+const StudioPanel: FC<StudioPanelProps> = ({ isCollapsed, onToggle, onNoteClick, onItemClick, pendingGenerationLabel, hasSources, onMindMapNodeClick }) => {
     const [currentView, setCurrentView] = useState<'grid' | 'flashcards' | 'architecture' | 'report' | 'quiz'>('grid');
     const [generatingItems, setGeneratingItems] = useState<string[]>([]);
-    const [notes, setNotes] = useState(initialData.notes);
+    const [notes, setNotes] = useState<GeneratedNote[]>([]);
 
     useEffect(() => {
         if (pendingGenerationLabel) {
@@ -83,16 +109,17 @@ const StudioPanel: FC<StudioPanelProps> = ({ isCollapsed, onToggle, onNoteClick,
             else if (lowerLabel.includes('infographic')) viewType = 'infographic';
             else if (lowerLabel.includes('slide deck')) viewType = 'slide_deck';
 
-            const newNote = {
+            const studioItem = STUDIO_ITEMS.find(i => i.label === label);
+            const newNote: GeneratedNote = {
                 id: Date.now().toString(),
-                icon: initialData.studioItems.find((i: any) => i.label === label)?.icon || 'FileText',
-                title: label === 'Report' ? 'jAI Agent Framework Briefing' : `${label} Output`,
+                icon: studioItem?.icon || 'FileText',
+                title: `${label} Output`,
                 subtitle: "1 source · just now",
-                color: initialData.studioItems.find((i: any) => i.label === label)?.color || 'text-blue-500',
+                color: studioItem?.color || 'text-blue-500',
                 clickable: true,
                 viewType: viewType
             };
-            setNotes([newNote, ...notes]);
+            setNotes(prev => [newNote, ...prev]);
         }, 10000);
     };
 
@@ -171,9 +198,9 @@ const StudioPanel: FC<StudioPanelProps> = ({ isCollapsed, onToggle, onNoteClick,
                     <p className="text-xs text-[#166534] leading-relaxed break-words">
                         Create an <span className="font-semibold whitespace-nowrap">Audio Overview</span> in:
                         <span className="whitespace-normal">
-                            {initialData.languages.map((lang: string, i: number) => (
+                            {SUPPORTED_LANGUAGES.map((lang, i) => (
                                 <span key={lang} className="text-blue-600 cursor-pointer hover:underline ml-1">
-                                    {lang}{i < initialData.languages.length - 1 ? "," : ""}
+                                    {lang}{i < SUPPORTED_LANGUAGES.length - 1 ? "," : ""}
                                 </span>
                             ))}
                         </span>
@@ -182,7 +209,7 @@ const StudioPanel: FC<StudioPanelProps> = ({ isCollapsed, onToggle, onNoteClick,
 
                 {/* Grid Area */}
                 <div className="grid grid-cols-2 gap-2 shrink-0">
-                    {initialData.studioItems.map((item: any) => (
+                    {STUDIO_ITEMS.map((item) => (
                         <StudioItem
                             key={item.id}
                             icon={<IconMapper name={item.icon} className={item.color} />}

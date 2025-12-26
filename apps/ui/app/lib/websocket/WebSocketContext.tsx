@@ -51,7 +51,7 @@ export function WebSocketProvider({
     if (!sessionId) return null;
   
     const baseUrl =
-      process.env.NEXT_PUBLIC_WEBSOCKET_URL ?? "ws://localhost:8400";
+      process.env.NEXT_PUBLIC_WEBSOCKET_URL ?? "ws://localhost:8004";
   
     const url = new URL(`/ws/chat/${sessionId}`, baseUrl);
   

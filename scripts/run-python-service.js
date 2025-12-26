@@ -73,7 +73,8 @@ const serviceDirMap = {
 const serviceDir = serviceDirMap[serviceName] || 'services';
 
 // Services that should skip hot reload (to avoid issues)
-const skipReloadServices = ['rag', 'websocket'];
+// On Windows, glob patterns in --reload-exclude get expanded by shell, causing issues
+const skipReloadServices = ['rag', 'websocket', 'agents'];
 
 // Build uvicorn command arguments
 const args = [

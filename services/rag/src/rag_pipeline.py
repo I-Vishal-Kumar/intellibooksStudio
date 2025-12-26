@@ -69,6 +69,13 @@ class RAGConfig:
     openrouter_api_key: str = ""
     openrouter_model: str = "anthropic/claude-sonnet-4"
 
+    # Neo4j settings
+    neo4j_uri: str = "bolt://localhost:7687"
+    neo4j_user: str = "neo4j"
+    neo4j_password: str = "devpassword123"
+    neo4j_database: str = "neo4j"
+    enable_knowledge_graph: bool = True  # Enable entity extraction for knowledge graph
+
 
 def load_config() -> RAGConfig:
     """Load configuration from environment."""
@@ -102,6 +109,11 @@ def load_config() -> RAGConfig:
         ray_address=os.getenv("RAY_ADDRESS", "ray://localhost:10001"),
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
         openrouter_model=os.getenv("OPENROUTER_MODEL", "anthropic/claude-sonnet-4"),
+        neo4j_uri=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
+        neo4j_user=os.getenv("NEO4J_USER", "neo4j"),
+        neo4j_password=os.getenv("NEO4J_PASSWORD", "devpassword123"),
+        neo4j_database=os.getenv("NEO4J_DATABASE", "neo4j"),
+        enable_knowledge_graph=os.getenv("ENABLE_KNOWLEDGE_GRAPH", "true").lower() == "true",
     )
 
 
@@ -142,6 +154,7 @@ class RAGResponse:
     query: str
     processing_time_ms: float
     confidence: float = 0.0
+    retrieval_stats: Dict[str, Any] = None
 
 
 # ============ Embedding Service ============
@@ -1061,6 +1074,114 @@ class IntelliBooksPipeline:
             self.rabbitmq = RabbitMQQueue(self.config)
             self.rabbitmq.connect()
 
+        # Initialize Neo4j and entity extraction if enabled
+        self._neo4j_store = None
+        self._entity_extractor = None
+        self._neo4j_initialized = False
+
+    async def _init_knowledge_graph(self):
+        """Lazily initialize Neo4j and entity extractor."""
+        if self._neo4j_initialized or not self.config.enable_knowledge_graph:
+            return
+
+        self._neo4j_initialized = True
+
+        try:
+            from .graph_store import Neo4jStore, EntityExtractor
+
+            # Initialize Neo4j store
+            self._neo4j_store = Neo4jStore(
+                uri=self.config.neo4j_uri,
+                user=self.config.neo4j_user,
+                password=self.config.neo4j_password,
+                database=self.config.neo4j_database,
+            )
+            connected = await self._neo4j_store.connect()
+
+            if connected:
+                self._entity_extractor = EntityExtractor()
+                logger.info("✅ Knowledge graph (Neo4j + Entity Extraction) initialized")
+            else:
+                logger.warning("⚠️ Neo4j unavailable, knowledge graph features disabled")
+                self._neo4j_store = None
+        except ImportError as e:
+            logger.warning(f"Knowledge graph dependencies not available: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize knowledge graph: {e}")
+
+    async def _extract_and_store_entities(
+        self,
+        chunks: List[Document],
+        document_id: str,
+        filename: str,
+        session_id: Optional[str] = None,
+    ):
+        """Extract entities from chunks and store in Neo4j (runs in background)."""
+        if not self._neo4j_store or not self._neo4j_store.is_available:
+            return
+
+        try:
+            from .graph_store import GraphNode, GraphEdge
+
+            # Add document to graph
+            await self._neo4j_store.add_document(document_id, filename, session_id)
+
+            # Extract entities from all chunks
+            chunk_contents = [chunk.content for chunk in chunks]
+            entities, relationships = await self._entity_extractor.extract_from_chunks(
+                chunk_contents, batch_size=3
+            )
+
+            if not entities:
+                logger.info(f"No entities extracted from {filename}")
+                return
+
+            # Convert to GraphNode objects
+            graph_nodes = [
+                GraphNode(
+                    id=entity.id,
+                    name=entity.name,
+                    type=entity.type.value,
+                    description=entity.description,
+                    confidence=entity.confidence,
+                )
+                for entity in entities
+            ]
+
+            # Add entities to Neo4j
+            for i, chunk in enumerate(chunks):
+                chunk_id = chunk.id
+                # Add chunk to graph
+                await self._neo4j_store.add_chunk(
+                    chunk_id=chunk_id,
+                    document_id=document_id,
+                    content=chunk.content[:500],
+                    position=i,
+                )
+
+            # Batch add entities
+            added_count = await self._neo4j_store.add_entities_batch(graph_nodes)
+
+            # Convert relationships to GraphEdge and add them
+            if relationships:
+                graph_edges = [
+                    GraphEdge(
+                        id=rel.id,
+                        source_id=rel.source.id,
+                        target_id=rel.target.id,
+                        relationship_type=rel.relationship_type.value,
+                        confidence=rel.confidence,
+                    )
+                    for rel in relationships
+                ]
+                rel_count = await self._neo4j_store.add_relationships_batch(graph_edges)
+                logger.info(f"📊 Knowledge graph: {added_count} entities, {rel_count} relationships from {filename}")
+            else:
+                logger.info(f"📊 Knowledge graph: {added_count} entities from {filename}")
+
+        except Exception as e:
+            logger.error(f"Entity extraction failed for {filename}: {e}")
+
     async def ingest_document(
         self,
         content: bytes,
@@ -1071,6 +1192,9 @@ class IntelliBooksPipeline:
         """Ingest a single document."""
         start_time = time.time()
 
+        # Initialize knowledge graph if enabled (lazy init)
+        await self._init_knowledge_graph()
+
         # Process document
         chunks, result = self.processor.process(content, filename, document_id, metadata)
 
@@ -1079,6 +1203,14 @@ class IntelliBooksPipeline:
 
         # Add to vector store
         await self.vector_store.add_documents(chunks)
+
+        # Extract entities and build knowledge graph (async, non-blocking)
+        session_id = metadata.get("session_id") if metadata else None
+        asyncio.create_task(
+            self._extract_and_store_entities(
+                chunks, result.document_id, filename, session_id
+            )
+        )
 
         result.processing_time_ms = (time.time() - start_time) * 1000
         return result
@@ -1189,6 +1321,7 @@ class IntelliBooksPipeline:
                 sources=[],
                 query=query,
                 processing_time_ms=(time.time() - start_time) * 1000,
+                retrieval_stats={"chunks_found": 0},
             )
 
         # Build context
@@ -1209,12 +1342,22 @@ class IntelliBooksPipeline:
         # Generate answer
         answer = await self._generate_answer(query, context)
 
+        # Calculate retrieval statistics
+        scores = [r.score for r in search_results]
+        avg_score = sum(scores) / len(scores) if scores else 0
+
         return RAGResponse(
             answer=answer,
             sources=sources,
             query=query,
             processing_time_ms=(time.time() - start_time) * 1000,
             confidence=search_results[0].score if search_results else 0,
+            retrieval_stats={
+                "chunks_found": len(search_results),
+                "avg_score": round(avg_score, 4),
+                "max_score": round(max(scores), 4) if scores else 0,
+                "min_score": round(min(scores), 4) if scores else 0,
+            },
         )
 
     async def _generate_answer(self, query: str, context: str) -> str:
@@ -1284,7 +1427,7 @@ Answer:"""),
         """Get pipeline statistics."""
         count = await self.vector_store.count()
 
-        return {
+        stats = {
             "total_chunks": count,
             "collection": self.config.chroma_collection,
             "embedding_model": self.config.embedding_model,
@@ -1292,4 +1435,63 @@ Answer:"""),
             "chroma_port": self.config.chroma_port,
             "ray_enabled": self.ray_available,
             "rabbitmq_enabled": self.rabbitmq is not None,
+            "knowledge_graph_enabled": self.config.enable_knowledge_graph,
+            "neo4j_available": self._neo4j_store.is_available if self._neo4j_store else False,
         }
+
+        # Add Neo4j stats if available
+        if self._neo4j_store and self._neo4j_store.is_available:
+            neo4j_stats = await self._neo4j_store.get_stats()
+            stats["knowledge_graph"] = neo4j_stats
+
+        return stats
+
+    async def get_knowledge_graph(
+        self, session_id: Optional[str] = None, limit: int = 100
+    ) -> Dict[str, Any]:
+        """Get knowledge graph data for visualization."""
+        await self._init_knowledge_graph()
+
+        if not self._neo4j_store or not self._neo4j_store.is_available:
+            return {"nodes": [], "edges": [], "error": "Neo4j not available"}
+
+        return await self._neo4j_store.get_knowledge_graph(session_id, limit)
+
+    async def search_entities(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Search entities in knowledge graph."""
+        await self._init_knowledge_graph()
+
+        if not self._neo4j_store or not self._neo4j_store.is_available:
+            return []
+
+        entities = await self._neo4j_store.search_entities(query, limit)
+        return [
+            {
+                "id": e.id,
+                "name": e.name,
+                "type": e.type,
+                "description": e.description,
+                "confidence": e.confidence,
+            }
+            for e in entities
+        ]
+
+    async def get_entity_details(self, entity_id: str) -> Dict[str, Any]:
+        """Get entity with its relationships."""
+        await self._init_knowledge_graph()
+
+        if not self._neo4j_store or not self._neo4j_store.is_available:
+            return {"entity": None, "relationships": []}
+
+        return await self._neo4j_store.get_entity_relationships(entity_id)
+
+    async def find_entity_path(
+        self, source_id: str, target_id: str, max_depth: int = 5
+    ) -> List[Dict[str, Any]]:
+        """Find path between two entities."""
+        await self._init_knowledge_graph()
+
+        if not self._neo4j_store or not self._neo4j_store.is_available:
+            return []
+
+        return await self._neo4j_store.find_path(source_id, target_id, max_depth)

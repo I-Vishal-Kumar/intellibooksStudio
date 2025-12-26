@@ -2,6 +2,7 @@
 
 from typing import Optional, Any, Dict, List
 from pathlib import Path
+import asyncio
 import logging
 import sys
 import os
@@ -22,29 +23,13 @@ except ImportError:
         DEEP_AGENTS_AVAILABLE = False
         create_deep_agent = None
 
-# Import RAG components
+# HTTP client for RAG service API calls
 try:
-    from services.rag.src.rag_pipeline import ChromaDBStore, RAGConfig, load_config
-    from services.rag.src.vector_store import ChromaVectorStore
-    from services.rag.src.retriever import SemanticRetriever
-    from services.rag.src.query_engine import RAGQueryEngine
-    RAG_AVAILABLE = True
+    import httpx
+    HTTPX_AVAILABLE = True
 except ImportError:
-    try:
-        # Try alternative import path
-        project_root = Path(__file__).parent.parent.parent.parent.parent
-        sys.path.insert(0, str(project_root))
-        from services.rag.src.rag_pipeline import ChromaDBStore, RAGConfig, load_config
-        from services.rag.src.retriever import SemanticRetriever
-        from services.rag.src.query_engine import RAGQueryEngine
-        RAG_AVAILABLE = True
-    except ImportError as e:
-        logging.warning(f"RAG components not available: {e}")
-        RAG_AVAILABLE = False
-        ChromaDBStore = None
-        RAGConfig = None
-        SemanticRetriever = None
-        RAGQueryEngine = None
+    logging.warning("httpx not available - RAG API calls will fail")
+    HTTPX_AVAILABLE = False
 
 # Import BaseAgent - ensure path is set
 _agent_framework_path = str(Path(__file__).parent.parent.parent.parent.parent / "packages" / "agent-framework" / "src")
@@ -74,87 +59,9 @@ from ..memory import MemoryManager
 logger = logging.getLogger(__name__)
 
 
-# Global RAG engine instance
-_rag_engine = None
-
-
-def get_rag_engine():
-    """Get or create the global RAG engine instance."""
-    global _rag_engine
-    if _rag_engine is None and RAG_AVAILABLE:
-        try:
-            # Load RAG config - this will use environment variables
-            # Priority: HTTP (Docker) first, then fallback to persistent (local)
-            rag_config = load_config()
-            
-            # Ensure HTTP is tried first (Docker), then persistent as fallback
-            # This is already the default in RAGConfig, but make it explicit
-            if not rag_config.chroma_use_http:
-                logger.info("CHROMA_USE_HTTP is False, but enabling it to try Docker first")
-                rag_config.chroma_use_http = True
-            
-            collection_name = rag_config.chroma_collection
-            logger.info(f"Initializing RAG engine with collection: {collection_name}")
-
-            # Initialize vector store with the same collection name as RAG service
-            # ChromaVectorStore now uses dual-mode (HTTP first, fallback to persistent)
-            # This ensures research agent uses the SAME ChromaDB as RAG service
-            vector_store = ChromaVectorStore(
-                collection_name=collection_name,
-                embedding_model=rag_config.embedding_model,
-            )
-
-            # Log connection info
-            conn_info = vector_store.get_connection_info()
-            logger.info(f"Vector store initialized: {conn_info}")
-            
-            # Check collection count for debugging
-            try:
-                import asyncio
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # If loop is running, we need to use a thread
-                    import concurrent.futures
-                    def get_count():
-                        new_loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(new_loop)
-                        try:
-                            return new_loop.run_until_complete(vector_store.count())
-                        finally:
-                            new_loop.close()
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(get_count)
-                        count = future.result(timeout=5)
-                else:
-                    count = loop.run_until_complete(vector_store.count())
-                logger.info(f"Collection '{collection_name}' has {count} documents")
-            except Exception as e:
-                logger.warning(f"Could not check collection count: {e}")
-            
-            # Initialize retriever with lower threshold to get more results
-            # ChromaDB returns similarity scores typically in 0.05-0.3 range for good matches
-            retriever = SemanticRetriever(
-                vector_store=vector_store,  # ChromaDBStore is compatible with ChromaVectorStore interface
-                default_top_k=5,
-                min_score_threshold=0.05,  # Lowered to 0.05 - ChromaDB similarity scores are typically low
-            )
-            
-            # Get LLM provider from config
-            from services.rag.src.config import get_settings
-            rag_settings = get_settings()
-            
-            # Initialize RAG query engine
-            _rag_engine = RAGQueryEngine(
-                retriever=retriever,
-                llm_provider=rag_settings.default_llm_provider,
-            )
-            
-            logger.info("RAG engine initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize RAG engine: {e}", exc_info=True)
-            _rag_engine = None
-    
-    return _rag_engine
+# RAG Service API URL - use HTTP calls to the unified RAG service
+# This ensures all services use the same RAG instance
+RAG_SERVICE_URL = os.getenv("RAG_SERVICE_URL", "http://localhost:8002")
 
 
 def knowledge_search(
@@ -163,71 +70,87 @@ def knowledge_search(
     filters: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Search the knowledge base using RAG.
-    
+    Search the knowledge base using the unified RAG service API.
+
+    This function calls the RAG service HTTP API instead of creating its own
+    RAG engine instance. This ensures all services use the same ChromaDB
+    collection and avoids stale collection ID issues.
+
     Args:
         query: The search query
         top_k: Number of results to return (default: 5)
         filters: Optional metadata filters (e.g., {"transcript_id": "123"})
-    
+
     Returns:
         Dictionary with answer, sources, and metadata
     """
     logger.info(f"🔍 Knowledge search called with query: '{query}', top_k: {top_k}, filters: {filters}")
-    
-    rag_engine = get_rag_engine()
-    
-    if not rag_engine:
-        logger.error("❌ RAG engine not initialized - knowledge base unavailable")
+
+    if not HTTPX_AVAILABLE:
+        logger.error("❌ httpx not available - cannot call RAG service")
         return {
-            "answer": "Knowledge base is currently unavailable.",
+            "answer": "Knowledge base is currently unavailable (httpx not installed).",
             "sources": [],
-            "error": "RAG engine not initialized",
+            "error": "httpx not available",
         }
-    
+
     try:
-        import asyncio
-        import concurrent.futures
-        
-        # Deep agents tools are synchronous, so we need to run async code
-        # Always run in a new thread with its own event loop to avoid conflicts
-        def run_in_thread():
-            """Run async code in a new thread with its own event loop."""
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            try:
-                return new_loop.run_until_complete(
-                    rag_engine.query(query, top_k=top_k, filters=filters)
-                )
-            finally:
-                new_loop.close()
-        
-        # Execute in thread pool to avoid event loop conflicts
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(run_in_thread)
-            rag_response = future.result(timeout=30)
-        
+        import httpx
+
+        # Call the RAG service API
+        with httpx.Client(timeout=60.0) as client:
+            response = client.post(
+                f"{RAG_SERVICE_URL}/api/rag/query",
+                json={
+                    "query": query,
+                    "top_k": top_k,
+                    "filters": filters,
+                }
+            )
+            response.raise_for_status()
+            rag_response = response.json()
+
+        # Extract response data
+        answer = rag_response.get("answer", "No answer available")
+        sources = rag_response.get("sources", [])
+        confidence = rag_response.get("confidence", 0.0)
+        retrieval_stats = rag_response.get("retrieval_stats", {})
+
         # Log retrieval results
-        logger.info(f"✅ Knowledge search completed")
-        logger.info(f"   📊 Confidence: {rag_response.confidence:.2f}")
-        logger.info(f"   📚 Sources found: {len(rag_response.sources)}")
-        logger.info(f"   📈 Retrieval stats: {rag_response.retrieval_stats}")
-        
-        if rag_response.sources:
+        logger.info(f"✅ Knowledge search completed via RAG service API")
+        logger.info(f"   📊 Confidence: {confidence:.2f}")
+        logger.info(f"   📚 Sources found: {len(sources)}")
+        logger.info(f"   📈 Retrieval stats: {retrieval_stats}")
+
+        if sources:
             logger.info("   📋 Retrieved sources:")
-            for i, source in enumerate(rag_response.sources, 1):
+            for i, source in enumerate(sources, 1):
                 transcript_id = source.get("transcript_id", "unknown")
                 score = source.get("score", 0.0)
                 preview = source.get("preview", "")[:100]
                 logger.info(f"      [{i}] Transcript: {transcript_id}, Score: {score:.3f}, Preview: {preview}...")
         else:
             logger.warning("   ⚠️  No sources retrieved from knowledge base")
-        
+
         return {
-            "answer": rag_response.answer,
-            "sources": rag_response.sources,
-            "confidence": rag_response.confidence,
-            "retrieval_stats": rag_response.retrieval_stats,
+            "answer": answer,
+            "sources": sources,
+            "confidence": confidence,
+            "retrieval_stats": retrieval_stats,
+        }
+    except httpx.HTTPStatusError as e:
+        logger.error(f"❌ RAG service returned error: {e.response.status_code} - {e.response.text}")
+        return {
+            "answer": f"Error from knowledge base service: {e.response.status_code}",
+            "sources": [],
+            "error": str(e),
+        }
+    except httpx.ConnectError as e:
+        logger.error(f"❌ Cannot connect to RAG service at {RAG_SERVICE_URL}: {e}")
+        return {
+            "answer": "Knowledge base service is not available. Please ensure the RAG service is running.",
+            "sources": [],
+            "error": f"Connection error: {e}",
         }
     except Exception as e:
         logger.error(f"❌ Knowledge search failed: {e}", exc_info=True)
@@ -677,12 +600,64 @@ Focus on identifying patterns, connections, and key insights across sources.""",
             # Deep agents use LangGraph format: {"messages": [{"role": "user", "content": query}]}
             # Use ainvoke() which is async and won't block
             self.logger.info(f"🚀 Invoking deep agent with query: '{query[:100]}...'")
-            
+
             try:
-                agent_result = await self.deep_agent.ainvoke({
-                    "messages": [{"role": "user", "content": query}]
-                })
+                # Add timeout to prevent hanging on slow LLM calls
+                agent_result = await asyncio.wait_for(
+                    self.deep_agent.ainvoke({
+                        "messages": [{"role": "user", "content": query}]
+                    }),
+                    timeout=120.0  # 2 minute timeout for complex queries
+                )
                 self.logger.info("✅ Deep agent invocation completed")
+            except asyncio.TimeoutError:
+                # Timeout occurred - return a timeout message
+                self.logger.warning(f"⏱️ Deep agent timed out after 120 seconds for query: '{query[:50]}...'")
+                # Try to get a quick answer directly from knowledge_search
+                timeout_response = "I apologize, but the request took too long to process. Let me try a simpler approach."
+                try:
+                    search_result = knowledge_search(query, top_k=5)
+                    if search_result.get("answer"):
+                        timeout_response = search_result["answer"]
+                        result.success = True
+                        result.data = {
+                            "response": timeout_response,
+                            "answer": timeout_response,
+                            "query": query,
+                            "sources": search_result.get("sources", []),
+                            "confidence": search_result.get("confidence", 0.0),
+                        }
+                        result.metadata = {
+                            "input_length": len(query),
+                            "response_length": len(timeout_response),
+                            "deep_agent_used": False,
+                            "sources_count": len(search_result.get("sources", [])),
+                            "confidence": search_result.get("confidence", 0.0),
+                            "timeout_fallback": True,
+                        }
+                        result.mark_complete()
+                        return result
+                except Exception as fallback_error:
+                    self.logger.error(f"Fallback also failed: {fallback_error}")
+
+                result.success = True
+                result.data = {
+                    "response": timeout_response,
+                    "answer": timeout_response,
+                    "query": query,
+                    "sources": [],
+                    "confidence": 0.0,
+                }
+                result.metadata = {
+                    "input_length": len(query),
+                    "response_length": len(timeout_response),
+                    "deep_agent_used": False,
+                    "sources_count": 0,
+                    "confidence": 0.0,
+                    "timed_out": True,
+                }
+                result.mark_complete()
+                return result
             except GuardrailsBlockedException as e:
                 # Guardrails blocked the request during deep agent execution - return blocking message
                 self.logger.warning(f"🚫 Request blocked by guardrails during execution: {e.reason}")

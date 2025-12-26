@@ -115,11 +115,13 @@ class ChromaHTTPClientWrapper:
         return result.get("nanosecond heartbeat", 0)
 
     def get_or_create_collection(self, name: str, metadata: dict = None):
-        """Get or create a collection, returns a collection-like object."""
-        if name in self._collection_cache:
-            return self._collection_cache[name]
+        """Get or create a collection, returns a collection-like object.
 
-        # Try to get existing collection first
+        Always fetches the current collection ID from ChromaDB to handle cases
+        where the collection was deleted and recreated (e.g., after clearing).
+        """
+        # Always fetch current collection info from ChromaDB to get the real ID
+        # This handles cases where collection was deleted and recreated
         collection_id = name
         try:
             result = self._request("GET", f"{self._api_base()}/collections/{name}")
@@ -137,7 +139,16 @@ class ChromaHTTPClientWrapper:
             )
             collection_id = result.get("id", name)
 
-        # Create collection wrapper
+        # Check if cached collection ID matches current ID
+        if name in self._collection_cache:
+            cached_collection = self._collection_cache[name]
+            if cached_collection.collection_id == collection_id:
+                return cached_collection
+            else:
+                # Collection was recreated with a new ID, update cache
+                logger.info(f"Collection '{name}' ID changed: {cached_collection.collection_id} -> {collection_id}")
+
+        # Create collection wrapper with current ID
         collection = HTTPCollectionWrapper(self, name, collection_id)
         self._collection_cache[name] = collection
         return collection
@@ -424,6 +435,26 @@ class ChromaVectorStore:
 
         return self._client
 
+    def _refresh_collection(self):
+        """Force refresh of the collection from ChromaDB.
+
+        This handles cases where the collection was deleted and recreated,
+        resulting in a new collection ID.
+        """
+        logger.info(f"🔄 Refreshing collection '{self.collection_name}' from ChromaDB...")
+        self._collection = None
+        # For HTTP client, also clear the collection cache
+        if self._use_http and hasattr(self._client, '_collection_cache'):
+            if self.collection_name in self._client._collection_cache:
+                del self._client._collection_cache[self.collection_name]
+        # Re-fetch
+        return self.collection
+
+    def _is_stale_collection_error(self, error: Exception) -> bool:
+        """Check if error indicates a stale/deleted collection ID (404 on collection operations)."""
+        error_str = str(error).lower()
+        return "404" in error_str and "collections" in error_str
+
     @property
     def collection(self):
         """Lazy load or create collection.
@@ -571,9 +602,10 @@ class ChromaVectorStore:
                 else:
                     where[key] = value
 
-        # Search with automatic fallback on connection errors
-        max_attempts = 2  # Try once, fallback once
+        # Search with automatic fallback on connection errors or stale collection
+        max_attempts = 3  # Try once, refresh collection once, fallback once
         last_error = None
+        collection_refreshed = False
 
         for attempt in range(max_attempts):
             mode = "HTTP" if self._use_http else "Persistent"
@@ -623,8 +655,14 @@ class ChromaVectorStore:
                 last_error = e
                 logger.error(f"❌ Search error (attempt {attempt + 1}): {e}")
 
+                # Check if this is a stale collection error (404 on collection)
+                if self._is_stale_collection_error(e) and not collection_refreshed:
+                    logger.warning("Stale collection ID detected (404) - refreshing collection...")
+                    self._refresh_collection()
+                    collection_refreshed = True
+                    continue  # Retry with refreshed collection
                 # Check if this is a connection error and we can fallback
-                if self._use_http and self._is_connection_error(e) and attempt < max_attempts - 1:
+                elif self._use_http and self._is_connection_error(e) and attempt < max_attempts - 1:
                     logger.warning("Connection error detected - triggering fallback to persistent mode")
                     self._fallback_to_persistent()
                     continue  # Retry with persistent client

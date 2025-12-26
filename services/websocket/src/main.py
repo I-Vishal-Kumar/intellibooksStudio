@@ -158,8 +158,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
-app.include_router(transcription.router)
+# Include route modules
 app.include_router(transcription.router)
 app.include_router(meetings.router)
 app.include_router(conversations.router)

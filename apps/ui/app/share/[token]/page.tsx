@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import ChatPanel from "../../components/dashboard_v2/ChatPanel";
+import ChatPanel from "../../components/studio/ChatPanel";
 import { Loader2 } from "lucide-react";
 
 interface PublicConversation {

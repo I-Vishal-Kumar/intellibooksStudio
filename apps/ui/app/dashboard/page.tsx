@@ -42,7 +42,7 @@ export default function DashboardPage() {
       workflows: "/workflows",
       audio: "/audio",
       chat: "/chat",
-      knowledge: "/dashboard/v2",  // Use v2 dashboard with session persistence
+      knowledge: "/studio",  // Unified studio for RAG, Chat, Agents
       analytics: "/analytics",
       settings: "/settings",
     };

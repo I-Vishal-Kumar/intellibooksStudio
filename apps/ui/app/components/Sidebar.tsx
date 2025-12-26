@@ -18,7 +18,7 @@ const navItems = [
   { id: "workflows", label: "Workflows", icon: Workflow, path: "/workflows" },
   { id: "audio", label: "Audio Processing", icon: FileText, path: "/audio" },
   { id: "chat", label: "Chat", icon: MessageSquare, path: "/chat" },
-  { id: "knowledge", label: "Knowledge", icon: BookOpen, path: "/knowledge" },
+  { id: "knowledge", label: "Studio", icon: BookOpen, path: "/studio" },
   { id: "analytics", label: "Analytics", icon: BarChart3, path: "/analytics" },
 ];
 

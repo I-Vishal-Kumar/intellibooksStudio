@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
@@ -208,13 +209,17 @@ async def upload_document(
             logger.info(f"Creating/getting session: {session_id}")
             await session_repo.get_or_create(session_id, title="New Notebook")
 
+        # Generate document_id if not provided - use same ID for both DB and pipeline
+        final_document_id = document_id or f"doc-{int(time.time() * 1000)}"
+        logger.info(f"Using document_id: {final_document_id}")
+
         # Create document record before processing (status: processing)
         doc_persisted = False
         if document_repo and session_id:
             logger.info(f"Persisting document to database...")
             doc_persisted = True
             await document_repo.create(
-                document_id=document_id or f"doc-{int(time.time() * 1000)}",
+                document_id=final_document_id,
                 session_id=session_id,
                 filename=filename,
                 file_type=file_extension or "unknown",
@@ -225,7 +230,7 @@ async def upload_document(
         result = await pipeline.ingest_document(
             content=content,
             filename=filename,
-            document_id=document_id,
+            document_id=final_document_id,  # Use the same document_id
             metadata={"session_id": session_id} if session_id else None,
         )
 
@@ -333,6 +338,7 @@ async def query_knowledge_base(request: QueryRequest):
             "query": response.query,
             "processing_time_ms": response.processing_time_ms,
             "confidence": response.confidence,
+            "retrieval_stats": response.retrieval_stats,
         }
 
     except Exception as e:
@@ -602,15 +608,16 @@ Summary:"""
 async def generate_knowledge_graph(request: KnowledgeGraphRequest):
     """Generate a knowledge graph from the indexed documents.
 
-    Extracts key concepts, entities, and their relationships from the
-    document chunks to create an interactive mind map visualization.
+    If Neo4j is available, returns entity-relationship graph from Neo4j.
+    Otherwise falls back to keyword-extraction based graph.
     """
     if pipeline is None:
         raise HTTPException(status_code=503, detail="RAG service not initialized")
 
     try:
-        # Get all document chunks for analysis
+        # Get stats to check if documents exist
         stats = await pipeline.get_stats()
+
         if stats.get("total_chunks", 0) == 0:
             return {
                 "success": False,
@@ -619,11 +626,190 @@ async def generate_knowledge_graph(request: KnowledgeGraphRequest):
                 "edges": [],
             }
 
-        # Generate knowledge graph using basic extraction
+        # Try Neo4j-based graph first - this will initialize Neo4j if needed
+        neo4j_graph = await pipeline.get_knowledge_graph(
+            session_id=request.session_id,
+            limit=request.max_nodes,
+        )
+
+        # Check if Neo4j returned data
+        if neo4j_graph.get("nodes"):
+            # Transform to match expected format
+            nodes = []
+            edges = []
+
+            # Color mapping for entity types
+            type_colors = {
+                "Person": "bg-[#bfdbfe]",
+                "Organization": "bg-[#dbeafe]",
+                "Concept": "bg-[#bbf7d0]",
+                "Topic": "bg-[#fde68a]",
+                "Event": "bg-[#fecaca]",
+                "Location": "bg-[#ddd6fe]",
+                "Product": "bg-[#a7f3d0]",
+                "Technology": "bg-[#7dd3fc]",
+                "Date": "bg-[#fcd34d]",
+                "Metric": "bg-[#fca5a5]",
+            }
+
+            for node in neo4j_graph["nodes"]:
+                entity_type = node.get("type", "Concept")
+                nodes.append({
+                    "id": node["id"],
+                    "label": node["label"],
+                    "type": entity_type.lower(),
+                    "color": type_colors.get(entity_type, "bg-[#f3f4f6]"),
+                    "level": 1,
+                    "metadata": {
+                        "entity_type": entity_type,
+                        "description": node.get("description"),
+                        "confidence": node.get("confidence", 1.0),
+                    },
+                })
+
+            for edge in neo4j_graph["edges"]:
+                edges.append({
+                    "id": edge["id"],
+                    "source": edge["source"],
+                    "target": edge["target"],
+                    "label": edge.get("label", "RELATED_TO"),
+                })
+
+            # Get updated stats now that Neo4j is initialized
+            updated_stats = await pipeline.get_stats()
+            graph_stats = updated_stats.get("knowledge_graph", {})
+
+            return {
+                "success": True,
+                "nodes": nodes,
+                "edges": edges,
+                "source": "neo4j",
+                "metadata": {
+                    "extraction_method": "llm_entity_extraction",
+                    "neo4j_available": True,
+                },
+                "statistics": {
+                    "tree_size": len(nodes),
+                    "total_edges": len(edges),
+                    "entities": graph_stats.get("entities", len(nodes)),
+                    "relationships": graph_stats.get("relationships", len(edges)),
+                },
+            }
+
+        # Fallback to keyword-based extraction
         return await _generate_basic_knowledge_graph(request)
 
     except Exception as e:
         logger.exception(f"Error generating knowledge graph: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class EntitySearchRequest(BaseModel):
+    """Request for searching entities."""
+    query: str
+    limit: int = 20
+
+
+class EntityPathRequest(BaseModel):
+    """Request for finding path between entities."""
+    source_id: str
+    target_id: str
+    max_depth: int = 5
+
+
+@app.post("/api/rag/graph/entities/search")
+async def search_entities(request: EntitySearchRequest):
+    """Search for entities in the knowledge graph by name."""
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="RAG service not initialized")
+
+    try:
+        entities = await pipeline.search_entities(request.query, request.limit)
+        return {
+            "success": True,
+            "query": request.query,
+            "entities": entities,
+            "count": len(entities),
+        }
+    except Exception as e:
+        logger.exception(f"Error searching entities: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/rag/graph/entities/{entity_id}")
+async def get_entity_details(entity_id: str):
+    """Get details of a specific entity including its relationships."""
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="RAG service not initialized")
+
+    try:
+        result = await pipeline.get_entity_details(entity_id)
+        entity = result.get("entity")
+
+        if not entity:
+            raise HTTPException(status_code=404, detail="Entity not found")
+
+        return {
+            "success": True,
+            "entity": {
+                "id": entity.id,
+                "name": entity.name,
+                "type": entity.type,
+                "description": entity.description,
+                "confidence": entity.confidence,
+            },
+            "relationships": result.get("relationships", []),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error getting entity details: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/rag/graph/path")
+async def find_entity_path(request: EntityPathRequest):
+    """Find the shortest path between two entities in the knowledge graph."""
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="RAG service not initialized")
+
+    try:
+        path = await pipeline.find_entity_path(
+            request.source_id,
+            request.target_id,
+            request.max_depth,
+        )
+
+        return {
+            "success": True,
+            "source_id": request.source_id,
+            "target_id": request.target_id,
+            "path": path,
+            "path_length": len(path) - 1 if path else 0,
+        }
+    except Exception as e:
+        logger.exception(f"Error finding entity path: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/rag/graph/stats")
+async def get_graph_stats():
+    """Get knowledge graph statistics."""
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="RAG service not initialized")
+
+    try:
+        stats = await pipeline.get_stats()
+        graph_stats = stats.get("knowledge_graph", {})
+
+        return {
+            "success": True,
+            "neo4j_available": stats.get("neo4j_available", False),
+            "knowledge_graph_enabled": stats.get("knowledge_graph_enabled", False),
+            "statistics": graph_stats,
+        }
+    except Exception as e:
+        logger.exception(f"Error getting graph stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -997,6 +1183,208 @@ def _extract_details(text: str, max_details: int = 3) -> List[str]:
             unique_details.append(d)
 
     return unique_details[:max_details]
+
+
+# ============ Audio & Video Generation Endpoints ============
+
+class AudioGenerationRequest(BaseModel):
+    """Request for audio overview generation."""
+    session_id: Optional[str] = None
+    format: str = "deep_dive"  # deep_dive, brief, critique, debate
+    language: str = "en-US"
+    length: str = "default"  # short, default, long
+    custom_topic: Optional[str] = None
+
+
+class VideoGenerationRequest(BaseModel):
+    """Request for video overview generation."""
+    session_id: Optional[str] = None
+    orientation: str = "landscape"  # landscape, portrait, square
+    detail_level: str = "standard"  # concise, standard, detailed
+    include_audio: bool = True
+    audio_language: str = "en-US"
+
+
+@app.post("/api/rag/generate-audio")
+async def generate_audio_overview(request: AudioGenerationRequest):
+    """Generate an audio summary of the indexed documents.
+
+    Uses Edge TTS for high-quality text-to-speech conversion.
+    """
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="RAG service not initialized")
+
+    try:
+        from ..media_generation.audio_generator import (
+            AudioGenerator, AudioConfig, AudioFormat, AudioLength
+        )
+
+        # Get document content
+        search_results = await pipeline.search(
+            query="main summary key points overview highlights",
+            top_k=20,
+        )
+
+        if not search_results:
+            raise HTTPException(status_code=400, detail="No documents indexed for audio generation")
+
+        # Combine content
+        combined_content = "\n\n".join([r.content for r in search_results])
+
+        # Get title from first document
+        filename = search_results[0].metadata.get("filename", "Document Summary")
+        title = filename.rsplit(".", 1)[0] if "." in filename else filename
+
+        # Create config
+        config = AudioConfig(
+            format=AudioFormat(request.format),
+            language=request.language,
+            length=AudioLength(request.length),
+            custom_topic=request.custom_topic,
+        )
+
+        # Generate audio
+        generator = AudioGenerator()
+        result = await generator.generate_audio_summary(
+            document_content=combined_content,
+            document_title=title,
+            config=config,
+            session_id=request.session_id,
+        )
+
+        if not result.success:
+            raise HTTPException(status_code=500, detail=result.error)
+
+        return {
+            "success": True,
+            "audio_path": result.audio_path,
+            "duration_seconds": result.duration_seconds,
+            "file_size_bytes": result.file_size_bytes,
+            "title": result.title,
+            "processing_time_ms": result.processing_time_ms,
+            "metadata": result.metadata,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Audio generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/rag/audio/{session_id}/{filename}")
+async def get_audio_file(session_id: str, filename: str):
+    """Serve generated audio file."""
+    audio_path = Path("data/audio_output") / session_id / filename
+
+    if not audio_path.exists():
+        # Try without session
+        audio_path = Path("data/audio_output") / filename
+        if not audio_path.exists():
+            raise HTTPException(status_code=404, detail="Audio file not found")
+
+    return FileResponse(
+        path=str(audio_path),
+        media_type="audio/mpeg",
+        filename=filename,
+    )
+
+
+@app.post("/api/rag/generate-video")
+async def generate_video_overview(request: VideoGenerationRequest):
+    """Generate a video summary of the indexed documents.
+
+    Uses DALL-E for images and Edge TTS for narration.
+    """
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="RAG service not initialized")
+
+    try:
+        from ..media_generation.video_generator import (
+            VideoGenerator, VideoConfig, VideoOrientation, VideoDetailLevel
+        )
+
+        # Get document content
+        search_results = await pipeline.search(
+            query="main summary key points overview highlights",
+            top_k=20,
+        )
+
+        if not search_results:
+            raise HTTPException(status_code=400, detail="No documents indexed for video generation")
+
+        # Combine content
+        combined_content = "\n\n".join([r.content for r in search_results])
+
+        # Get title from first document
+        filename = search_results[0].metadata.get("filename", "Document Summary")
+        title = filename.rsplit(".", 1)[0] if "." in filename else filename
+
+        # Create config
+        config = VideoConfig(
+            orientation=VideoOrientation(request.orientation),
+            detail_level=VideoDetailLevel(request.detail_level),
+            include_audio=request.include_audio,
+            audio_language=request.audio_language,
+        )
+
+        # Generate video
+        generator = VideoGenerator()
+        result = await generator.generate_video_summary(
+            document_content=combined_content,
+            document_title=title,
+            config=config,
+            session_id=request.session_id,
+        )
+
+        if not result.success:
+            raise HTTPException(status_code=500, detail=result.error)
+
+        return {
+            "success": True,
+            "video_path": result.video_path,
+            "duration_seconds": result.duration_seconds,
+            "file_size_bytes": result.file_size_bytes,
+            "title": result.title,
+            "processing_time_ms": result.processing_time_ms,
+            "metadata": result.metadata,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Video generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/rag/video/{session_id}/{filename}")
+async def get_video_file(session_id: str, filename: str):
+    """Serve generated video file."""
+    video_path = Path("data/video_output") / session_id / filename
+
+    if not video_path.exists():
+        # Try without session
+        video_path = Path("data/video_output") / filename
+        if not video_path.exists():
+            raise HTTPException(status_code=404, detail="Video file not found")
+
+    return FileResponse(
+        path=str(video_path),
+        media_type="video/mp4",
+        filename=filename,
+    )
+
+
+@app.get("/api/rag/tts-voices")
+async def list_tts_voices(language: Optional[str] = None):
+    """List available TTS voices."""
+    try:
+        from ..media_generation.audio_generator import AudioGenerator
+        voices = await AudioGenerator.list_voices(language)
+        return {"voices": voices, "count": len(voices)}
+    except Exception as e:
+        logger.exception(f"Failed to list voices: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

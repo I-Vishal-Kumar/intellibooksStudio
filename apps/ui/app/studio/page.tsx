@@ -4,23 +4,22 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import * as Icons from "lucide-react";
-import Sidebar from "@/components/dashboard_v2/Sidebar";
-import ChatPanel from "@/components/dashboard_v2/ChatPanel";
-import StudioPanel from "@/components/dashboard_v2/StudioPanel";
-import Header from "@/components/dashboard_v2/Header";
-import ResizeHandle from "@/components/dashboard_v2/ResizeHandle";
-import ArchitectureView from "@/components/dashboard_v2/ArchitectureView";
-import UploadModal from "@/components/dashboard_v2/UploadModal";
-import FlashcardsView from "@/components/dashboard_v2/FlashcardsView";
-import ReportView from "@/components/dashboard_v2/ReportView";
-import QuizView from "@/components/dashboard_v2/QuizView";
-import StudioCustomizationModal from "@/components/dashboard_v2/StudioCustomizationModal";
-import AudioView from "@/components/dashboard_v2/AudioView";
-import VideoView from "@/components/dashboard_v2/VideoView";
-import InfographicView from "@/components/dashboard_v2/InfographicView";
-import SlideDeckView from "@/components/dashboard_v2/SlideDeckView";
+import Sidebar from "@/components/studio/Sidebar";
+import ChatPanel from "@/components/studio/ChatPanel";
+import StudioPanel from "@/components/studio/StudioPanel";
+import Header from "@/components/studio/Header";
+import ResizeHandle from "@/components/studio/ResizeHandle";
+import ArchitectureView from "@/components/studio/ArchitectureView";
+import UploadModal from "@/components/studio/UploadModal";
+import FlashcardsView from "@/components/studio/FlashcardsView";
+import ReportView from "@/components/studio/ReportView";
+import QuizView from "@/components/studio/QuizView";
+import StudioCustomizationModal from "@/components/studio/StudioCustomizationModal";
+import AudioView from "@/components/studio/AudioView";
+import VideoView from "@/components/studio/VideoView";
+import InfographicView from "@/components/studio/InfographicView";
+import SlideDeckView from "@/components/studio/SlideDeckView";
 import { WebSocketProvider, useWebSocketContext } from "@/lib/websocket";
-import dummyData from "../../dummy_data/dummy_data.json";
 import {
     listSessions,
     createSession,
@@ -126,54 +125,44 @@ function KnowledgePageContent({
         }
     }, [isLoaded, isSignedIn, router]);
 
-    // Initialize sessions and load documents from DB on mount
+    // Load documents and session info for the current session
     useEffect(() => {
-        const initializeSessions = async () => {
+        const loadSessionData = async () => {
+            if (!currentSessionId) return;
+
             try {
-                // Try to fetch existing sessions
+                // Fetch session details and persistence status
                 const response = await listSessions();
                 setSessions(response.sessions);
                 setPersistenceEnabled(response.persistence_enabled);
 
-                if (response.sessions.length > 0) {
-                    // Use the most recent session
-                    const latestSession = response.sessions[0];
-                    setCurrentSessionId(latestSession.session_id);
-                    setNotebookTitle(latestSession.title || "Knowledge Base");
+                // Find current session to get title
+                const currentSession = response.sessions.find(s => s.session_id === currentSessionId);
+                if (currentSession?.title) {
+                    setNotebookTitle(currentSession.title);
+                }
 
-                    // Load documents for this session from the database
-                    const docs = await fetchDocuments(latestSession.session_id);
-                    if (docs.length > 0) {
-                        setDocuments(docs.map(doc => ({
-                            id: doc.document_id,
-                            filename: doc.filename,
-                            chunks: doc.chunks_count || 0,
-                            uploadedAt: new Date(doc.created_at || Date.now()),
-                            status: doc.status as "processing" | "ready" | "error",
-                        })));
-                    }
-                } else {
-                    // Create a new session
-                    const localSessionId = generateSessionId();
-                    setCurrentSessionId(localSessionId);
-                    try {
-                        await createSession("New Notebook", localSessionId);
-                    } catch (e) {
-                        console.error("Failed to create initial session:", e);
-                    }
+                // Load documents for this session from the database
+                const docs = await fetchDocuments(currentSessionId);
+                if (docs.length > 0) {
+                    setDocuments(docs.map(doc => ({
+                        id: doc.document_id,
+                        filename: doc.filename,
+                        chunks: doc.chunks_count || 0,
+                        uploadedAt: new Date(doc.created_at || Date.now()),
+                        status: doc.status as "processing" | "ready" | "error",
+                    })));
+                    console.log(`Loaded ${docs.length} documents for session ${currentSessionId}`);
                 }
             } catch (error) {
-                console.error("Failed to initialize sessions:", error);
-                // Fallback: generate a local session ID
-                const localSessionId = generateSessionId();
-                setCurrentSessionId(localSessionId);
+                console.error("Failed to load session data:", error);
             }
         };
 
-        if (isLoaded && isSignedIn) {
-            initializeSessions();
+        if (isLoaded && isSignedIn && currentSessionId) {
+            loadSessionData();
         }
-    }, [isLoaded, isSignedIn]);
+    }, [isLoaded, isSignedIn, currentSessionId]);
 
     // Fetch RAG stats on mount
     useEffect(() => {
@@ -635,7 +624,6 @@ function KnowledgePageContent({
                             onItemClick={handleItemClickFromStudio}
                             pendingGenerationLabel={pendingGeneration}
                             hasSources={hasSources}
-                            data={dummyData}
                             onMindMapNodeClick={(nodeLabel: string, nodeData: any) => {
                                 // Send a contextual query to chat about the clicked node
                                 const rootContext = nodeData?.rootLabel || 'the knowledge base';
@@ -733,16 +721,41 @@ function KnowledgePageContent({
 // Main component that wraps everything with WebSocketProvider
 export default function KnowledgePage() {
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+    const [isInitialized, setIsInitialized] = useState(false);
     const { isSignedIn, isLoaded } = useUser();
     const router = useRouter();
 
-    // Generate initial session ID
+    // Initialize session from database or generate new one
     useEffect(() => {
-        if (!currentSessionId) {
-            const newSessionId = generateSessionId();
-            setCurrentSessionId(newSessionId);
-        }
-    }, [currentSessionId]);
+        const initSession = async () => {
+            if (!isLoaded || !isSignedIn) return;
+
+            try {
+                // Try to fetch existing sessions first
+                const response = await listSessions();
+
+                if (response.sessions.length > 0) {
+                    // Use the most recent session
+                    const latestSession = response.sessions[0];
+                    setCurrentSessionId(latestSession.session_id);
+                } else {
+                    // No existing sessions - create a new one
+                    const newSessionId = generateSessionId();
+                    setCurrentSessionId(newSessionId);
+                    await createSession("New Notebook", newSessionId);
+                }
+            } catch (error) {
+                console.error("Failed to initialize session:", error);
+                // Fallback: generate a local session ID
+                const newSessionId = generateSessionId();
+                setCurrentSessionId(newSessionId);
+            }
+
+            setIsInitialized(true);
+        };
+
+        initSession();
+    }, [isLoaded, isSignedIn]);
 
     // Redirect if not signed in
     useEffect(() => {
@@ -752,7 +765,7 @@ export default function KnowledgePage() {
     }, [isLoaded, isSignedIn, router]);
 
     // Show loading until we have a session ID
-    if (!currentSessionId) {
+    if (!currentSessionId || !isInitialized) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-gray-50">
                 <div className="animate-pulse">Loading...</div>

@@ -32,17 +32,20 @@ interface GraphEdge {
     id: string;
     source: string;
     target: string;
+    label?: string;
 }
 
 interface GraphStatistics {
     tree_size: number;
-    tree_height: number;
+    tree_height?: number;
     total_edges: number;
-    leaf_nodes: number;
-    parent_nodes: number;
-    child_nodes: number;
-    nodes_by_level: Record<number, number>;
-    level_names: Record<number, string>;
+    leaf_nodes?: number;
+    parent_nodes?: number;
+    child_nodes?: number;
+    nodes_by_level?: Record<number, number>;
+    level_names?: Record<number, string>;
+    entities?: number;
+    relationships?: number;
 }
 
 interface KnowledgeGraphData {
@@ -52,7 +55,26 @@ interface KnowledgeGraphData {
     metadata?: Record<string, unknown>;
     statistics?: GraphStatistics;
     error?: string;
+    source?: "neo4j" | "keyword";
 }
+
+// Entity type colors for Neo4j-based graph
+const ENTITY_TYPE_COLORS: Record<string, { bg: string; hex: string; label: string }> = {
+    person: { bg: "bg-[#bfdbfe]", hex: "#bfdbfe", label: "Person" },
+    organization: { bg: "bg-[#dbeafe]", hex: "#dbeafe", label: "Organization" },
+    concept: { bg: "bg-[#bbf7d0]", hex: "#bbf7d0", label: "Concept" },
+    topic: { bg: "bg-[#fde68a]", hex: "#fde68a", label: "Topic" },
+    event: { bg: "bg-[#fecaca]", hex: "#fecaca", label: "Event" },
+    location: { bg: "bg-[#ddd6fe]", hex: "#ddd6fe", label: "Location" },
+    product: { bg: "bg-[#a7f3d0]", hex: "#a7f3d0", label: "Product" },
+    technology: { bg: "bg-[#7dd3fc]", hex: "#7dd3fc", label: "Technology" },
+    date: { bg: "bg-[#fcd34d]", hex: "#fcd34d", label: "Date" },
+    metric: { bg: "bg-[#fca5a5]", hex: "#fca5a5", label: "Metric" },
+    root: { bg: "bg-gradient-to-r from-indigo-500 to-purple-600", hex: "#8b5cf6", label: "Root" },
+    theme: { bg: "bg-[#bfdbfe]", hex: "#bfdbfe", label: "Theme" },
+    subtopic: { bg: "bg-[#bbf7d0]", hex: "#bbf7d0", label: "Subtopic" },
+    detail: { bg: "bg-[#f3f4f6]", hex: "#f3f4f6", label: "Detail" },
+};
 
 // --- Custom Node Component ---
 const MindMapNode = ({ data }: NodeProps) => {
@@ -274,6 +296,8 @@ const ArchitectureView: React.FC<ArchitectureViewProps> = ({
 
         // Create edges only for visible nodes
         const visibleNodeIds = new Set(nodes.map(n => n.id));
+        const isNeo4jGraph = graphData.source === "neo4j";
+
         graphData.edges.forEach(edge => {
             if (visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)) {
                 edges.push({
@@ -283,6 +307,14 @@ const ArchitectureView: React.FC<ArchitectureViewProps> = ({
                     animated: false,
                     style: { stroke: '#cbd5e1', strokeWidth: 2 },
                     type: 'smoothstep',
+                    // Add label for Neo4j relationship edges
+                    ...(isNeo4jGraph && edge.label && edge.label !== "RELATED_TO" ? {
+                        label: edge.label.replace(/_/g, ' ').toLowerCase(),
+                        labelStyle: { fontSize: 10, fill: '#6b7280' },
+                        labelBgStyle: { fill: 'white', fillOpacity: 0.8 },
+                        labelBgPadding: [4, 2] as [number, number],
+                        labelBgBorderRadius: 4,
+                    } : {}),
                 });
             }
         });
@@ -413,17 +445,15 @@ const ArchitectureView: React.FC<ArchitectureViewProps> = ({
                             <MiniMap
                                 className="bg-white/80 border border-gray-100 rounded-xl shadow-lg"
                                 nodeColor={(node) => {
+                                    const nodeType = (node.data as { nodeType?: string })?.nodeType?.toLowerCase() || '';
+                                    const typeConfig = ENTITY_TYPE_COLORS[nodeType];
+                                    if (typeConfig) return typeConfig.hex;
+
+                                    // Fallback to color extraction from bg class
                                     const color = (node.data as { color?: string })?.color;
                                     if (!color) return '#bfdbfe';
-                                    // Map Tailwind bg classes to hex colors
-                                    const colorMap: Record<string, string> = {
-                                        'bg-[#bfdbfe]': '#bfdbfe',
-                                        'bg-[#fef3c7]': '#fef3c7',
-                                        'bg-[#d1fae5]': '#d1fae5',
-                                        'bg-[#e9d5ff]': '#e9d5ff',
-                                        'bg-[#fecaca]': '#fecaca',
-                                    };
-                                    return colorMap[color] || '#bfdbfe';
+                                    const match = color.match(/bg-\[#([a-fA-F0-9]+)\]/);
+                                    return match ? `#${match[1]}` : '#bfdbfe';
                                 }}
                                 maskColor="rgba(0, 0, 0, 0.1)"
                                 position="bottom-right"
@@ -455,19 +485,41 @@ const ArchitectureView: React.FC<ArchitectureViewProps> = ({
                             {/* Statistics Panel */}
                             {graphData?.statistics && (
                                 <Panel position="top-right" className="m-4">
-                                    <div className="bg-white/90 backdrop-blur-sm border border-gray-100 rounded-xl p-3 shadow-lg max-w-[200px]">
-                                        <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Graph Stats</h4>
+                                    <div className="bg-white/90 backdrop-blur-sm border border-gray-100 rounded-xl p-3 shadow-lg max-w-[220px]">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Graph Stats</h4>
+                                            {graphData.source === "neo4j" && (
+                                                <span className="text-[9px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded font-medium">Neo4j</span>
+                                            )}
+                                        </div>
                                         <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
-                                            <span className="text-gray-500">Tree Size:</span>
-                                            <span className="font-semibold text-gray-700">{graphData.statistics.tree_size}</span>
-                                            <span className="text-gray-500">Tree Height:</span>
-                                            <span className="font-semibold text-gray-700">{graphData.statistics.tree_height}</span>
-                                            <span className="text-gray-500">Edges:</span>
-                                            <span className="font-semibold text-gray-700">{graphData.statistics.total_edges}</span>
-                                            <span className="text-gray-500">Leaf Nodes:</span>
-                                            <span className="font-semibold text-green-600">{graphData.statistics.leaf_nodes}</span>
-                                            <span className="text-gray-500">Parent Nodes:</span>
-                                            <span className="font-semibold text-blue-600">{graphData.statistics.parent_nodes}</span>
+                                            {graphData.source === "neo4j" ? (
+                                                <>
+                                                    <span className="text-gray-500">Entities:</span>
+                                                    <span className="font-semibold text-purple-600">{graphData.statistics.entities || graphData.statistics.tree_size}</span>
+                                                    <span className="text-gray-500">Relationships:</span>
+                                                    <span className="font-semibold text-blue-600">{graphData.statistics.relationships || graphData.statistics.total_edges}</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <span className="text-gray-500">Tree Size:</span>
+                                                    <span className="font-semibold text-gray-700">{graphData.statistics.tree_size}</span>
+                                                    {graphData.statistics.tree_height && (
+                                                        <>
+                                                            <span className="text-gray-500">Tree Height:</span>
+                                                            <span className="font-semibold text-gray-700">{graphData.statistics.tree_height}</span>
+                                                        </>
+                                                    )}
+                                                    <span className="text-gray-500">Edges:</span>
+                                                    <span className="font-semibold text-gray-700">{graphData.statistics.total_edges}</span>
+                                                    {graphData.statistics.leaf_nodes && (
+                                                        <>
+                                                            <span className="text-gray-500">Leaf Nodes:</span>
+                                                            <span className="font-semibold text-green-600">{graphData.statistics.leaf_nodes}</span>
+                                                        </>
+                                                    )}
+                                                </>
+                                            )}
                                         </div>
                                         {graphData.statistics.nodes_by_level && (
                                             <div className="mt-2 pt-2 border-t border-gray-100">
@@ -481,6 +533,28 @@ const ArchitectureView: React.FC<ArchitectureViewProps> = ({
                                                 </div>
                                             </div>
                                         )}
+                                    </div>
+                                </Panel>
+                            )}
+
+                            {/* Entity Type Legend (for Neo4j graphs) */}
+                            {graphData?.source === "neo4j" && graphData?.nodes.length > 0 && (
+                                <Panel position="bottom-right" className="m-4 mb-32">
+                                    <div className="bg-white/90 backdrop-blur-sm border border-gray-100 rounded-xl p-3 shadow-lg">
+                                        <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Entity Types</h4>
+                                        <div className="flex flex-wrap gap-1.5 max-w-[200px]">
+                                            {/* Show only entity types present in current graph */}
+                                            {Array.from(new Set(graphData.nodes.map(n => n.type.toLowerCase()))).map(type => {
+                                                const config = ENTITY_TYPE_COLORS[type];
+                                                if (!config) return null;
+                                                return (
+                                                    <div key={type} className="flex items-center gap-1.5">
+                                                        <div className={`w-3 h-3 rounded ${config.bg}`} />
+                                                        <span className="text-[10px] text-gray-600">{config.label}</span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
                                     </div>
                                 </Panel>
                             )}
